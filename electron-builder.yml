@@ -1,0 +1,57 @@
+appId: io.github.manueltorres01.aegisguard
+productName: Aegis Guard
+copyright: Copyright (c) 2026 Aegis Guard contributors
+
+asar: true
+disableAsarIntegrity: false
+compression: normal
+forceCodeSigning: true
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - desktop/**/*
+  - src/**/*
+  - config/**/*
+  - definitions/**/*
+  - package.json
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+  artifactName: Aegis-Guard-Setup-${version}-${arch}.${ext}
+  # publisherName is deliberately omitted. It must come from the real
+  # Authenticode certificate and must never be guessed or hard-coded early.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Aegis Guard
+  deleteAppDataOnUninstall: false
+
+publish:
+  provider: github
+  owner: manueltorres01
+  repo: aegis-guard
+  channel: latest
+  releaseType: draft
+  private: false
+
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  loadBrowserProcessSpecificV8Snapshot: false
+  grantFileProtocolExtraPrivileges: false

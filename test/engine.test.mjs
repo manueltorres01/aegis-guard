@@ -49,7 +49,7 @@ test('detects the harmless simulator and quarantines instead of deleting', async
   const quarantine = new Quarantine(path.join(dir, 'vault'));
   await quarantine.isolate(sample, result);
   await assert.rejects(fs.access(sample));
-  assert.equal((await quarantine.list()).length, 1);
+  assert.equal((await quarantine.list()).items.length, 1);
 });
 
 test('does not detect the encoded definitions file as malware', async () => {

@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  >
+  <meta name="color-scheme" content="light dark">
+  <title>Aegis Guard</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2 4.5 5v5.5c0 5.2 3.2 9.1 7.5 11.5 4.3-2.4 7.5-6.3 7.5-11.5V5L12 2Z"/><path d="m8.7 12.1 2.1 2.1 4.7-5"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9M9 20v-6h6v6"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3m13 5h3a2 2 0 0 0 2-2v-3"/><circle cx="12" cy="12" r="4"/></symbol>
+    <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2m-4.3-5.7L12 12"/></symbol>
+    <symbol id="i-results" viewBox="0 0 24 24"><path d="M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="i-vault" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4m8-4v4M8 14h8"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.2 4.2 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.8 4.2a2 2 0 0 0-3.6 0Z"/><path d="M12 9v4m0 4h.01"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.2 9A7 7 0 0 0 6.4 6.4L4 9m16 6-2.4 2.6A7 7 0 0 1 5.8 15"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4V8Z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9h6v6H9z"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  </svg>
+
+  <a class="skip-link" href="#main-content">Saltar al contenido</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Navegación principal">
+      <div class="brand">
+        <span class="brand-mark"><svg aria-hidden="true"><use href="#i-shield"/></svg></span>
+        <span class="brand-copy"><strong>Aegis Guard</strong><small>Seguridad local</small></span>
+      </div>
+
+      <nav class="main-nav">
+        <button class="nav-item" type="button" data-view="home" aria-current="page">
+          <svg aria-hidden="true"><use href="#i-home"/></svg><span>Inicio</span>
+        </button>
+        <button class="nav-item" type="button" data-view="scan">
+          <svg aria-hidden="true"><use href="#i-scan"/></svg><span>Analizar</span>
+        </button>
+        <button class="nav-item" type="button" data-view="protection">
+          <svg aria-hidden="true"><use href="#i-radar"/></svg><span>Protección</span>
+        </button>
+        <button class="nav-item" type="button" data-view="results">
+          <svg aria-hidden="true"><use href="#i-results"/></svg><span>Resultados</span>
+          <span class="nav-badge" id="results-badge" hidden>0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="quarantine">
+          <svg aria-hidden="true"><use href="#i-vault"/></svg><span>Cuarentena</span>
+          <span class="nav-badge" id="quarantine-badge" hidden>0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="settings">
+          <svg aria-hidden="true"><use href="#i-settings"/></svg><span>Ajustes</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="experimental-note">
+          <svg aria-hidden="true"><use href="#i-info"/></svg>
+          <span>Proyecto experimental<br><small>No sustituye a Microsoft Defender</small></span>
+        </div>
+        <span class="version-label">Aegis <span id="sidebar-version">—</span></span>
+      </div>
+    </aside>
+
+    <main class="main-area" id="main-content" tabindex="-1">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="page-eyebrow">Resumen</p>
+          <h1 id="page-title">Inicio</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="preview-pill" id="preview-pill" hidden>Vista previa</span>
+          <button class="icon-button" id="theme-cycle" type="button" aria-label="Cambiar tema" title="Cambiar tema">
+            <svg aria-hidden="true"><use href="#i-sun"/></svg>
+          </button>
+          <div class="engine-status" id="engine-status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span>Motor listo</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="content-frame">
+        <section class="view is-active" id="view-home" data-title="Inicio" data-eyebrow="Resumen" aria-labelledby="home-heading">
+          <div class="status-hero card" id="home-status-card">
+            <div class="status-emblem is-safe" id="status-emblem">
+              <svg aria-hidden="true"><use href="#i-shield"/></svg>
+            </div>
+            <div class="status-copy">
+              <p class="overline" id="status-overline">Estado del último análisis</p>
+              <h2 id="home-heading">Sin amenazas detectadas por Aegis</h2>
+              <p id="home-status-description">Este estado refleja únicamente los archivos que Aegis ha analizado. Microsoft Defender debe permanecer activado.</p>
+              <div class="status-meta">
+                <span><svg aria-hidden="true"><use href="#i-clock"/></svg><span id="last-scan-label">Aún no se ha realizado ningún análisis</span></span>
+                <span><span class="mini-dot" aria-hidden="true"></span>Definiciones <span id="definitions-version">locales</span></span>
+              </div>
+            </div>
+            <div class="hero-actions">
+              <button class="button primary" type="button" data-action="quick-scan">
+                <svg aria-hidden="true"><use href="#i-scan"/></svg> Análisis rápido
+              </button>
+              <button class="button secondary" type="button" data-action="deep-scan">Análisis profundo</button>
+            </div>
+          </div>
+
+          <div class="metric-grid" aria-label="Resumen de actividad">
+            <article class="metric-card card">
+              <span class="metric-icon blue"><svg aria-hidden="true"><use href="#i-results"/></svg></span>
+              <div><strong id="metric-scanned">0</strong><span>Archivos analizados</span></div>
+            </article>
+            <article class="metric-card card">
+              <span class="metric-icon amber"><svg aria-hidden="true"><use href="#i-alert"/></svg></span>
+              <div><strong id="metric-findings">0</strong><span>Hallazgos recientes</span></div>
+            </article>
+            <article class="metric-card card">
+              <span class="metric-icon violet"><svg aria-hidden="true"><use href="#i-vault"/></svg></span>
+              <div><strong id="metric-quarantine">0</strong><span>En cuarentena</span></div>
+            </article>
+          </div>
+
+          <div class="home-columns">
+            <article class="card section-card">
+              <div class="section-heading compact">
+                <div><p class="overline">Actividad</p><h2>Últimos eventos</h2></div>
+                <button class="text-button" type="button" data-view-link="results">Ver resultados <svg aria-hidden="true"><use href="#i-arrow"/></svg></button>
+              </div>
+              <div class="activity-list" id="activity-list">
+                <div class="empty-compact"><svg aria-hidden="true"><use href="#i-clock"/></svg><span>No hay actividad registrada todavía.</span></div>
+              </div>
+            </article>
+            <article class="card section-card protection-summary">
+              <div class="section-heading compact">
+                <div><p class="overline">Protección de Descargas</p><h2 id="home-monitor-title">Consultando estado</h2></div>
+                <span class="soft-status" id="home-monitor-status">Preparando</span>
+              </div>
+              <p>Aegis observa los archivos nuevos o modificados de Descargas durante la sesión. No sustituye a Microsoft Defender.</p>
+              <button class="button secondary full-width" type="button" data-view-link="protection">Ver protección</button>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-scan" data-title="Analizar" data-eyebrow="Detección local" aria-labelledby="scan-heading" hidden>
+          <div class="section-heading page-heading">
+            <div><h2 id="scan-heading">Elige el nivel de análisis</h2><p>Aegis solo lee los archivos alcanzados por el modo elegido; nunca los ejecuta ni los envía fuera del equipo.</p></div>
+          </div>
+
+          <div class="scan-choice-grid" id="scan-choices">
+            <button class="scan-choice card" type="button" data-action="quick-scan">
+              <span class="choice-icon blue"><svg aria-hidden="true"><use href="#i-scan"/></svg></span>
+              <span class="choice-copy"><strong>Análisis rápido</strong><small>Revisa archivos regulares del primer nivel de Descargas, incluidos los ocultos accesibles.</small><em>Sin subcarpetas · puede omitir archivos de más de 128 MiB</em></span>
+              <svg class="choice-arrow" aria-hidden="true"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="scan-choice card" type="button" data-action="full-scan">
+              <span class="choice-icon green"><svg aria-hidden="true"><use href="#i-shield"/></svg></span>
+              <span class="choice-copy"><strong>Análisis exhaustivo</strong><small>Recorre las unidades locales con letra que Windows enumere, sus subcarpetas y elementos ocultos accesibles.</small><em>Sin límite por tamaño · puede durar horas o días</em></span>
+              <svg class="choice-arrow" aria-hidden="true"><use href="#i-chevron"/></svg>
+            </button>
+            <button class="scan-choice card" type="button" data-action="deep-scan">
+              <span class="choice-icon violet"><svg aria-hidden="true"><use href="#i-folder"/></svg></span>
+              <span class="choice-copy"><strong>Análisis profundo</strong><small>Elige un archivo o carpeta con el diálogo de Windows; las carpetas incluyen ocultos y subcarpetas accesibles.</small><em>Ruta elegida · sin límite por tamaño</em></span>
+              <svg class="choice-arrow" aria-hidden="true"><use href="#i-chevron"/></svg>
+            </button>
+          </div>
+
+          <article class="card scan-workspace" id="scan-workspace" aria-live="polite">
+            <div class="scan-workspace-header">
+              <div class="scan-state-icon" id="scan-state-icon"><svg aria-hidden="true"><use href="#i-scan"/></svg></div>
+              <div>
+                <p class="overline" id="scan-phase-label">Preparado</p>
+                <h3 id="scan-status-title">Selecciona un tipo de análisis</h3>
+                <p class="truncate" id="scan-target-label">El progreso y los resultados aparecerán aquí.</p>
+              </div>
+              <button class="button danger-quiet" id="cancel-scan" type="button" hidden>Cancelar</button>
+            </div>
+            <div class="progress-track" id="scan-progress-track" role="progressbar" aria-label="Progreso del análisis" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <progress class="progress-value" id="scan-progress-value" max="100" value="0" aria-hidden="true"></progress>
+            </div>
+            <div class="scan-progress-meta" id="scan-progress-meta" hidden>
+              <span id="scan-elapsed-label">Tiempo transcurrido · 00:00</span>
+              <span id="scan-progress-context">Calculando el alcance…</span>
+            </div>
+            <div class="scan-counters">
+              <div><strong id="scan-count-scanned">0</strong><span>Analizados</span></div>
+              <div><strong id="scan-count-total">—</strong><span>Encontrados</span></div>
+              <div><strong id="scan-count-threats">0</strong><span>Amenazas</span></div>
+              <div><strong id="scan-count-errors">0</strong><span>Errores</span></div>
+              <div id="scan-skipped-counter" aria-label="Omitidos: 0"><strong id="scan-count-skipped">0</strong><span>Omitidos</span></div>
+            </div>
+            <p class="current-file truncate" id="scan-current-file" hidden><span class="pulse-dot" aria-hidden="true"></span><span></span></p>
+            <div class="scan-scope-note" id="scan-scope-note">
+              <svg aria-hidden="true"><use href="#i-info"/></svg>
+              <p><strong id="scan-scope-title">Cobertura transparente</strong><span id="scan-scope-copy">Selecciona un análisis para ver su alcance. Los archivos sin permisos de lectura no se fuerzan ni se abren.</span></p>
+            </div>
+          </article>
+
+          <aside class="info-banner">
+            <svg aria-hidden="true"><use href="#i-info"/></svg>
+            <p><strong>Decisiones explicables.</strong> Cada hallazgo muestra la regla que se activó y su puntuación. La cuarentena cifra el archivo y permite restaurarlo.</p>
+          </aside>
+        </section>
+
+        <section class="view" id="view-protection" data-title="Protección" data-eyebrow="Vigilancia de Descargas" aria-labelledby="protection-heading" hidden>
+          <div class="section-heading page-heading">
+            <div><h2 id="protection-heading">Protección de Descargas</h2><p>Aegis observa archivos nuevos o modificados dentro de la carpeta Descargas durante cada sesión.</p></div>
+          </div>
+
+          <article class="card monitor-card">
+            <div class="monitor-visual" id="protection-visual"><span class="radar-ring"></span><svg aria-hidden="true"><use href="#i-radar"/></svg></div>
+            <div class="monitor-copy">
+              <p class="overline" id="protection-overline">Consultando estado</p>
+              <h3 id="protection-status-heading">Preparando la protección de Descargas</h3>
+              <p id="protection-description">Esta vigilancia se limita a Descargas y no sustituye la protección completa de Microsoft Defender.</p>
+              <div class="target-display" id="protection-target-display">
+                <svg aria-hidden="true"><use href="#i-folder"/></svg>
+                <span id="protection-target-label">Descargas de Windows</span>
+                <span class="target-scope">Solo esta carpeta</span>
+              </div>
+              <div class="button-row">
+                <button class="button secondary" id="toggle-protection" type="button" disabled><svg aria-hidden="true"><use href="#i-stop"/></svg><span>Pausar hasta reiniciar Aegis</span></button>
+              </div>
+              <div class="session-warning" id="protection-pause-warning" role="status" hidden>
+                <svg aria-hidden="true"><use href="#i-info"/></svg>
+                <p><strong>Pausa temporal.</strong> No persiste: al reiniciar Aegis, la protección de Descargas volverá a activarse. Toda vigilancia en tiempo real está pausada; los análisis manuales siguen disponibles.</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="card manual-monitor-card" aria-labelledby="manual-monitor-title">
+            <div class="manual-monitor-intro">
+              <span class="choice-icon violet"><svg aria-hidden="true"><use href="#i-folder"/></svg></span>
+              <div>
+                <p class="overline" id="monitor-overline">Carpeta adicional opcional</p>
+                <h3 id="manual-monitor-title"><span id="monitor-heading">Elige otra carpeta para vigilar</span></h3>
+                <p id="monitor-description">Aegis puede observar una carpeta adicional durante esta sesión.</p>
+              </div>
+            </div>
+            <div class="manual-monitor-controls">
+              <div class="target-display" id="monitor-target-display">
+                <svg aria-hidden="true"><use href="#i-folder"/></svg>
+                <span id="monitor-target-label">Ninguna carpeta seleccionada</span>
+                <button class="text-button" id="choose-monitor-target" type="button">Cambiar</button>
+              </div>
+              <div class="button-row">
+                <button class="button primary" id="start-monitor" type="button" disabled><svg aria-hidden="true"><use href="#i-play"/></svg> Iniciar vigilancia</button>
+                <button class="button secondary" id="stop-monitor" type="button" hidden><svg aria-hidden="true"><use href="#i-stop"/></svg><span>Detener vigilancia</span></button>
+              </div>
+            </div>
+          </article>
+
+          <div class="fact-grid">
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-folder"/></svg><div><strong>Descargas por defecto</strong><p>La vigilancia automática se limita a Descargas; la carpeta adicional es opcional.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-clock"/></svg><div><strong>Protección de la sesión</strong><p>Una pausa termina al reiniciar Aegis y no cancela análisis manuales.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-info"/></svg><div><strong>Microsoft Defender</strong><p>Mantenlo activado como protección principal del equipo.</p></div></article>
+          </div>
+        </section>
+
+        <section class="view" id="view-results" data-title="Resultados" data-eyebrow="Historial de análisis" aria-labelledby="results-heading" hidden>
+          <div class="section-heading page-heading table-heading">
+            <div><h2 id="results-heading">Resultados</h2><p id="results-summary">Todavía no hay análisis registrados.</p></div>
+            <div class="filter-group" aria-label="Filtrar resultados">
+              <button class="filter-button is-selected" type="button" data-filter="all" aria-pressed="true">Todos</button>
+              <button class="filter-button" type="button" data-filter="attention" aria-pressed="false">Requieren atención</button>
+            </div>
+          </div>
+          <article class="card data-card">
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th scope="col">Estado</th><th scope="col">Archivo</th><th scope="col">Riesgo</th><th scope="col">Motivo</th><th scope="col">Acción</th></tr></thead>
+                <tbody id="results-body"></tbody>
+              </table>
+            </div>
+            <div class="table-empty" id="results-empty">
+              <span class="empty-icon"><svg aria-hidden="true"><use href="#i-results"/></svg></span>
+              <h3>No hay resultados</h3>
+              <p>Realiza un análisis para ver aquí sus conclusiones.</p>
+              <button class="button primary" type="button" data-view-link="scan">Ir a Analizar</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="view-quarantine" data-title="Cuarentena" data-eyebrow="Almacén cifrado" aria-labelledby="quarantine-heading" hidden>
+          <div class="section-heading page-heading table-heading">
+            <div><h2 id="quarantine-heading">Cuarentena</h2><p>Los archivos aislados se guardan cifrados y no pueden ejecutarse desde aquí.</p></div>
+            <button class="button secondary" id="refresh-quarantine" type="button"><svg aria-hidden="true"><use href="#i-refresh"/></svg> Actualizar</button>
+          </div>
+          <aside class="info-banner warning-soft">
+            <svg aria-hidden="true"><use href="#i-info"/></svg>
+            <p>Restaurar devuelve el archivo a una ubicación que tú elijas. Hazlo solo si confías en él.</p>
+          </aside>
+          <aside class="info-banner warning-soft" id="quarantine-inventory-warning" role="status" hidden>
+            <svg aria-hidden="true"><use href="#i-alert"/></svg>
+            <p id="quarantine-inventory-warning-copy"></p>
+          </aside>
+          <article class="card data-card">
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th scope="col">Archivo original</th><th scope="col">Detectado</th><th scope="col">Veredicto</th><th scope="col">Identificador</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead>
+                <tbody id="quarantine-body"></tbody>
+              </table>
+            </div>
+            <div class="table-empty" id="quarantine-empty">
+              <span class="empty-icon safe"><svg aria-hidden="true"><use href="#i-vault"/></svg></span>
+              <h3>La cuarentena está vacía</h3>
+              <p>Los elementos aislados aparecerán aquí.</p>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="view-settings" data-title="Ajustes" data-eyebrow="Preferencias" aria-labelledby="settings-heading" hidden>
+          <div class="section-heading page-heading">
+            <div><h2 id="settings-heading">Ajustes</h2><p>Configura la experiencia sin reducir las protecciones de Windows.</p></div>
+          </div>
+          <div class="settings-layout">
+            <div class="settings-stack">
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon blue"><svg aria-hidden="true"><use href="#i-sun"/></svg></span><div><h3>Apariencia</h3><p>Elige cómo se muestra Aegis Guard.</p></div></div>
+                <label class="field-label" for="theme-select">Tema</label>
+                <select id="theme-select">
+                  <option value="system">Usar configuración del sistema</option>
+                  <option value="light">Claro</option>
+                  <option value="dark">Oscuro</option>
+                </select>
+              </article>
+
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon violet"><svg aria-hidden="true"><use href="#i-vault"/></svg></span><div><h3>Respuesta ante amenazas</h3><p>Controla qué ocurre al detectar una amenaza con alta confianza.</p></div></div>
+                <label class="toggle-row" for="auto-quarantine">
+                  <span><strong>Cuarentena automática</strong><small>Si está activada, Aegis aislará detecciones maliciosas. Desactivada por defecto.</small></span>
+                  <input id="auto-quarantine" type="checkbox" role="switch">
+                  <span class="toggle" aria-hidden="true"></span>
+                </label>
+              </article>
+
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon green"><svg aria-hidden="true"><use href="#i-play"/></svg></span><div><h3>Inicio de Windows</h3><p>Controla si Aegis se abre al iniciar tu sesión de Windows.</p></div></div>
+                <label class="toggle-row" for="start-with-windows">
+                  <span><strong>Iniciar con Windows</strong><small id="startup-setting-note">Permite que Aegis active la protección de Descargas al comenzar cada sesión. Activado por defecto.</small></span>
+                  <input id="start-with-windows" type="checkbox" role="switch" checked>
+                  <span class="toggle" aria-hidden="true"></span>
+                </label>
+              </article>
+            </div>
+
+            <div class="settings-stack">
+              <article class="card settings-card about-card">
+                <p class="overline">Aplicación</p>
+                <div class="about-brand"><span class="brand-mark large"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Aegis Guard</h3><p>Versión <span id="about-version">—</span></p></div></div>
+                <dl class="version-list">
+                  <div><dt>Motor</dt><dd id="engine-version">—</dd></div>
+                  <div><dt>Definiciones</dt><dd id="about-definitions">—</dd></div>
+                </dl>
+                <button class="button secondary full-width" id="check-updates" type="button"><svg aria-hidden="true"><use href="#i-refresh"/></svg> Buscar actualizaciones</button>
+                <button class="button primary full-width" id="restart-update" type="button" hidden>Reiniciar y actualizar</button>
+                <p class="update-status" id="update-status" role="status"></p>
+              </article>
+
+              <article class="card settings-card test-card">
+                <div class="settings-card-title"><span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-play"/></svg></span><div><h3>Prueba segura</h3><p>Crea un archivo de texto inofensivo para verificar detección y cuarentena. No contiene código ejecutable.</p></div></div>
+                <button class="button secondary full-width" id="run-simulation" type="button">Ejecutar simulación inofensiva</button>
+              </article>
+            </div>
+          </div>
+          <p class="save-status" id="settings-save-status" role="status"></p>
+        </section>
+
+        <section class="fatal-panel card" id="fatal-panel" hidden aria-labelledby="fatal-title">
+          <span class="empty-icon danger"><svg aria-hidden="true"><use href="#i-alert"/></svg></span>
+          <h2 id="fatal-title">No se pudo iniciar la interfaz</h2>
+          <p id="fatal-message">La conexión segura con Aegis no está disponible.</p>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="false"></div>
+
+  <dialog id="restore-dialog" aria-labelledby="restore-dialog-title">
+    <div class="dialog-icon"><svg aria-hidden="true"><use href="#i-vault"/></svg></div>
+    <h2 id="restore-dialog-title">¿Restaurar este archivo?</h2>
+    <p id="restore-dialog-copy">Elige una ubicación segura y analiza el archivo con Microsoft Defender antes de abrirlo.</p>
+    <div class="dialog-actions">
+      <button class="button secondary" id="restore-cancel" type="button">Cancelar</button>
+      <button class="button primary" id="restore-confirm" type="button">Elegir ubicación y restaurar</button>
+    </div>
+  </dialog>
+
+  <dialog id="isolate-dialog" aria-labelledby="isolate-dialog-title">
+    <div class="dialog-icon danger"><svg aria-hidden="true"><use href="#i-shield"/></svg></div>
+    <h2 id="isolate-dialog-title">¿Aislar este archivo?</h2>
+    <p id="isolate-dialog-copy">Aegis lo moverá a la cuarentena cifrada. Podrás restaurarlo más adelante.</p>
+    <div class="dialog-actions">
+      <button class="button secondary" id="isolate-cancel" type="button">Cancelar</button>
+      <button class="button danger-quiet" id="isolate-confirm" type="button">Aislar en cuarentena</button>
+    </div>
+  </dialog>
+
+  <dialog id="pause-protection-dialog" aria-labelledby="pause-protection-dialog-title">
+    <div class="dialog-icon danger"><svg aria-hidden="true"><use href="#i-alert"/></svg></div>
+    <h2 id="pause-protection-dialog-title">¿Pausar la vigilancia en tiempo real?</h2>
+    <p>Los archivos nuevos o modificados de Descargas y cualquier carpeta vigilada manualmente no se analizarán en tiempo real hasta que reanudes o reinicies Aegis. Los análisis manuales no se cancelarán y Microsoft Defender debe permanecer activo.</p>
+    <div class="dialog-actions">
+      <button class="button secondary" id="pause-protection-cancel" type="button">Cancelar</button>
+      <button class="button danger-quiet" id="pause-protection-confirm" type="button">Pausar hasta reiniciar Aegis</button>
+    </div>
+  </dialog>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

@@ -1,7 +1,11 @@
 node_modules/
+.npm-cache/
+dist/
 .aegis-quarantine/
 coverage/
 *.log
+*.pfx
+*.p12
 .DS_Store
 Thumbs.db
 .idea/

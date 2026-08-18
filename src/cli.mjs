@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ScanEngine } from './engine.mjs';
 import { Quarantine } from './quarantine.mjs';
 import { createHarmlessSimulation } from './simulator.mjs';
+import { WatchService } from './watch-service.mjs';
 import { formatBytes, loadJson } from './util.mjs';
 
 const base = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,26 +46,24 @@ async function scan(targetPath, isolate, { updateExitCode = true } = {}) {
 async function watch(targetPath, autoQuarantine) {
   const root = path.resolve(targetPath);
   console.log(`Watching ${root}. Press Ctrl+C to stop.`);
-  const timers = new Map();
-  fs.watch(root, { recursive: true }, (_event, name) => {
-    if (!name) return;
-    if (name.split(/[\\/]/).some(segment => engine.exclude.has(segment.toLowerCase()))) return;
-    const file = path.join(root, name);
-    clearTimeout(timers.get(file));
-    timers.set(file, setTimeout(async () => {
-      timers.delete(file);
-      try {
-        const result = await engine.scanFile(file);
+  const service = new WatchService({
+    engine,
+    quarantine,
+    emit: event => {
+      if (event.type === 'monitor-result') {
+        const result = event.payload.result;
         printResult(result);
-        if (result.verdict === 'malicious' && autoQuarantine) {
-          const metadata = await quarantine.isolate(file, result);
-          console.log(`  Quarantined safely as ${metadata.id}.`);
-        } else if (result.verdict === 'malicious') {
+        if (result.action === 'quarantined') console.log(`  Quarantined safely as ${result.quarantineId}.`);
+        else if (result.verdict === 'malicious') {
           console.log('  Action required: run scan with --quarantine to isolate it.');
         }
-      } catch { /* transient rename/deletion */ }
-    }, 350));
+      } else if (event.type === 'monitor-error' || event.type === 'monitor-warning') {
+        console.warn(`Aegis monitor: ${event.payload.message}`);
+      }
+    }
   });
+  await service.start(root, { autoQuarantine });
+  process.once('SIGINT', () => { void service.stop(); });
 }
 
 try {
