@@ -1,6 +1,6 @@
 {
   "name": "aegis-guard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Auditable Windows malware scanner with a secure desktop interface and encrypted quarantine",
   "type": "module",
