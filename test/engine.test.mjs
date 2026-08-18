@@ -57,3 +57,68 @@ test('does not detect the encoded definitions file as malware', async () => {
   const result = await engine.scanFile(fileURLToPath(new URL('../definitions/signatures.json', import.meta.url)));
   assert.equal(result.verdict, 'clean');
 });
+
+test('does not treat a single process API name in a DLL as an injection combination', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'legitimate-component.dll');
+  await fs.writeFile(sample, Buffer.concat([Buffer.from('MZ WriteProcessMemory ordinary import data '), Buffer.alloc(8192, 65)]));
+  const engine = new ScanEngine({ definitions, threshold: 60, maxFileSizeMb: 1 });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.verdict, 'clean');
+  assert.equal(result.findings.some(x => x.id === 'heuristic.pe-api-combination'), false);
+});
+
+test('requires a real group of process-injection API references in a binary', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'injector.dll');
+  await fs.writeFile(sample, Buffer.concat([Buffer.from('MZ CreateRemoteThread VirtualAllocEx WriteProcessMemory '), Buffer.alloc(8192, 65)]));
+  const engine = new ScanEngine({ definitions, threshold: 60, maxFileSizeMb: 1 });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.verdict, 'suspicious');
+  assert.ok(result.findings.some(x => x.id === 'heuristic.pe-api-combination'));
+});
+
+test('keeps script-only execution rules out of ordinary PE string tables', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'script-host.dll');
+  await fs.writeFile(sample, Buffer.concat([Buffer.from('MZ FromBase64String Invoke-Expression help text'), Buffer.alloc(8192, 65)]));
+  const engine = new ScanEngine({ definitions, threshold: 60, maxFileSizeMb: 1 });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.verdict, 'clean');
+  assert.equal(result.findings.some(x => x.id === 'heuristic.script'), false);
+});
+
+test('records valid trusted signatures and neutralizes only low-confidence binary heuristics', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'signed-driver.dll');
+  await fs.writeFile(sample, Buffer.concat([Buffer.from('MZ CreateRemoteThread VirtualAllocEx WriteProcessMemory '), Buffer.alloc(8192, 65)]));
+  const engine = new ScanEngine({
+    definitions, threshold: 60, maxFileSizeMb: 1,
+    trustedPublisherOrganizations: ['Microsoft Corporation'],
+    trustVerifier: async () => ({ status: 'valid', subject: 'CN=Microsoft Windows, O=Microsoft Corporation', organization: 'Microsoft Corporation' })
+  });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.verdict, 'clean');
+  assert.equal(result.score, 0);
+  assert.equal(result.trust.organization, 'Microsoft Corporation');
+  assert.ok(result.findings.some(x => x.id === 'trust.authenticode'));
+});
+
+test('does not trust a valid signature from an unlisted publisher', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'signed-unknown.dll');
+  await fs.writeFile(sample, Buffer.concat([Buffer.from('MZ CreateRemoteThread VirtualAllocEx WriteProcessMemory '), Buffer.alloc(8192, 65)]));
+  const engine = new ScanEngine({
+    definitions, threshold: 60, maxFileSizeMb: 1,
+    trustedPublisherOrganizations: ['Microsoft Corporation'],
+    trustVerifier: async () => ({ status: 'valid', subject: 'CN=Unknown Vendor', organization: 'Unknown Vendor' })
+  });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.verdict, 'suspicious');
+  assert.equal(result.score, 28);
+});

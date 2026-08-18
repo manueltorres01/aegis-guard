@@ -114,7 +114,7 @@ Quarantine is stored in `.aegis-quarantine` by default. Set `AEGIS_QUARANTINE` t
 
 ## How detection works
 
-Each finding adds an explainable score. A score of 60 or more is classified as `malicious`; 25–59 is `suspicious`; lower scores are `clean`. Only `malicious` results are automatically quarantined when explicitly enabled. Thresholds, Quick-scan maximum file size, concurrency and Quick/CLI exclusions live in `config/default.json`; Deep and Full scans use streaming reads without that size or name-based exclusion policy.
+Each finding adds an explainable score. A score of 60 or more is classified as `malicious`; 25–59 is `suspicious`; lower scores are `clean`. Script-content rules apply only to script formats; PE files require the complete configured API group before receiving the process-injection heuristic. On Windows, suspicious PE-like files can be enriched with Authenticode status. A valid signature from an explicitly configured publisher can neutralize only low-confidence entropy/API-reference findings; it never overrides an exact malware signature or script behavior, and names or paths alone are never trusted. Only `malicious` results are automatically quarantined when explicitly enabled. Thresholds, trusted publisher organizations, Quick-scan maximum file size, concurrency and Quick/CLI exclusions live in `config/default.json`; Deep and Full scans use streaming reads without that size or name-based exclusion policy.
 
 The engine never executes scanned content. Test literals are Base64-encoded in the repository so the definitions file does not detect itself. Base64 is not treated as a security boundary; it only avoids accidental self-matches.
 
@@ -147,11 +147,14 @@ Aegis does not yet include a signed Windows minifilter driver, background Window
 
 ## Roadmap
 
-1. Signed and rollback-safe definition updates
-2. PE parsing, Authenticode checks, archive scanning and YARA-compatible rules
-3. Least-privilege Windows service with AMSI/ETW integration
-4. Privacy-preserving reputation and behavioral correlation
-5. Corpus evaluation, fuzzing, external audit and reproducible signed releases
+1. Export complete scan reports from **Results** to JSON and CSV, preserving paths, verdicts, scores, findings, actions, timestamps and scan summary
+2. Add **Results** filters for malicious, suspicious, file-analysis errors and skipped files, in addition to the existing overview
+3. Make **Restore** return quarantined files directly to their recorded original path without opening a destination picker, while retaining no-overwrite and path-safety protections
+4. Signed and rollback-safe definition updates
+5. PE parsing, Authenticode checks, archive scanning and YARA-compatible rules
+6. Least-privilege Windows service with AMSI/ETW integration
+7. Privacy-preserving reputation and behavioral correlation
+8. Corpus evaluation, fuzzing, external audit and reproducible signed releases
 
 ## Security and contributing
 

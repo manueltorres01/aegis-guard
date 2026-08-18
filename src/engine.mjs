@@ -3,15 +3,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const EXECUTABLE = new Set(['.exe', '.dll', '.scr', '.com', '.msi', '.jar', '.ps1', '.vbs', '.js', '.jse', '.bat', '.cmd', '.hta']);
+const SCRIPT = new Set(['.ps1', '.vbs', '.js', '.jse', '.bat', '.cmd', '.hta']);
+const AUTHENTICODE = new Set(['.exe', '.dll', '.scr', '.com', '.msi']);
 const LURE = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.txt']);
 const SCRIPT_RULES = [
   [/powershell(?:\.exe)?\s+[^\r\n]{0,160}-(?:enc|encodedcommand)\b/i, 35, 'Encoded PowerShell command'],
   [/(?:frombase64string|invoke-expression|\biex\b)/i, 18, 'Script obfuscation/execution primitive'],
   [/(?:vssadmin\s+delete\s+shadows|wmic\s+shadowcopy\s+delete)/i, 55, 'Shadow-copy deletion'],
-  [/(?:createremotethread|virtualalloc(?:ex)?|writeprocessmemory)/i, 28, 'Process-injection API combination'],
   [/(?:document_open|autoopen|workbook_open)/i, 20, 'Office auto-execution macro'],
   [/(?:rundll32|regsvr32|mshta)\.exe\s+(?:https?:|javascript:)/i, 40, 'Living-off-the-land remote execution']
 ];
+const INJECTION_APIS = ['createremotethread', 'virtualallocex', 'writeprocessmemory'];
 
 const DEFAULT_STREAM_CHUNK_BYTES = 1024 * 1024;
 const ENTROPY_SAMPLE_BYTES = 1024 * 1024;
@@ -36,6 +38,8 @@ export class ScanEngine {
     maxFileSizeMb = 128,
     exclude = [],
     excludePaths = [],
+    trustVerifier = null,
+    trustedPublisherOrganizations = [],
     isTransientPath = () => false
   }) {
     if (typeof isTransientPath !== 'function') throw new TypeError('isTransientPath must be a function');
@@ -45,6 +49,8 @@ export class ScanEngine {
     this.exclude = new Set(exclude.map(x => x.toLowerCase()));
     this.excludePaths = excludePaths.map(normalizePathKey);
     this.isTransientPath = isTransientPath;
+    this.trustVerifier = typeof trustVerifier === 'function' ? trustVerifier : null;
+    this.trustedPublisherOrganizations = new Set(trustedPublisherOrganizations.map(normalizePublisher));
     this.patternRules = (definitions.patterns ?? []).map(rule => ({
       ...rule,
       bytes: rule.literalBase64
@@ -90,7 +96,10 @@ export class ScanEngine {
         result.durationMs = elapsed(started);
         return result;
       }
-      const executable = EXECUTABLE.has(path.extname(path.basename(file).toLowerCase()));
+      const extension = path.extname(path.basename(file).toLowerCase());
+      const executable = EXECUTABLE.has(extension);
+      const script = SCRIPT.has(extension);
+      const peLike = AUTHENTICODE.has(extension);
       const hash = crypto.createHash('sha256');
       const buffer = Buffer.allocUnsafe(size);
       const entropySample = executable
@@ -98,6 +107,7 @@ export class ScanEngine {
         : null;
       const matchedPatterns = new Set();
       const matchedScripts = new Set();
+      const matchedInjectionApis = new Set();
       const overlapBytes = Math.max(this.patternOverlapBytes, executable ? SCRIPT_OVERLAP_BYTES : 0);
       let tail = Buffer.alloc(0);
       let position = 0;
@@ -121,10 +131,16 @@ export class ScanEngine {
         for (let index = 0; index < this.patternRules.length; index++) {
           if (!matchedPatterns.has(index) && window.includes(this.patternRules[index].bytes)) matchedPatterns.add(index);
         }
-        if (executable) {
+        if (script || peLike) {
           const latin = window.toString('latin1');
-          for (let index = 0; index < SCRIPT_RULES.length; index++) {
-            if (!matchedScripts.has(index) && SCRIPT_RULES[index][0].test(latin)) matchedScripts.add(index);
+          if (script) {
+            for (let index = 0; index < SCRIPT_RULES.length; index++) {
+              if (!matchedScripts.has(index) && SCRIPT_RULES[index][0].test(latin)) matchedScripts.add(index);
+            }
+          }
+          if (peLike) {
+            const folded = latin.toLowerCase();
+            for (const api of INJECTION_APIS) if (folded.includes(api)) matchedInjectionApis.add(api);
           }
         }
 
@@ -149,9 +165,15 @@ export class ScanEngine {
         const [, score, description] = SCRIPT_RULES[index];
         addFinding(result, 'heuristic.script', description, score);
       }
+      if (matchedInjectionApis.size === INJECTION_APIS.length) {
+        addFinding(result, 'heuristic.pe-api-combination', 'Multiple process-injection APIs are imported or referenced', 28);
+      }
       const sample = entropySample?.subarray(0, entropyLength) ?? Buffer.alloc(0);
       if (sample.length > 4096 && entropy(sample) > 7.65) {
         addFinding(result, 'heuristic.entropy', 'Unusually high entropy; file may be packed or encrypted', 18);
+      }
+      if (peLike && this.trustVerifier && heuristicScore(result) >= 25) {
+        await applyAuthenticodeTrust(result, file, this.trustVerifier, this.trustedPublisherOrganizations);
       }
       return finalizeResult(result, started, this.definitions, this.threshold);
     } finally {
@@ -452,27 +474,47 @@ function applyFilenameHeuristics(result, file) {
   }
 }
 
-function applyContentHeuristics(result, file, data) {
-  applyFilenameHeuristics(result, file);
-  const ext = path.extname(path.basename(file).toLowerCase());
-  if (!EXECUTABLE.has(ext)) return;
-  const latin = data.toString('latin1');
-  for (const [regex, score, description] of SCRIPT_RULES) {
-    if (regex.test(latin)) addFinding(result, 'heuristic.script', description, score);
-  }
-  const sample = data.subarray(0, Math.min(data.length, ENTROPY_SAMPLE_BYTES));
-  if (sample.length > 4096 && entropy(sample) > 7.65) {
-    addFinding(result, 'heuristic.entropy', 'Unusually high entropy; file may be packed or encrypted', 18);
-  }
-}
-
 function finalizeResult(result, started, definitions, threshold) {
   const known = definitions.sha256?.[result.sha256];
   if (known) addFinding(result, 'signature.sha256', known, 100);
-  result.score = Math.min(100, result.findings.reduce((sum, finding) => sum + finding.score, 0));
+  result.score = Math.max(0, Math.min(100, result.findings.reduce((sum, finding) => sum + finding.score, 0)));
   result.verdict = result.score >= threshold ? 'malicious' : result.score >= 25 ? 'suspicious' : 'clean';
   result.durationMs = elapsed(started);
   return result;
+}
+
+function heuristicScore(result) {
+  return result.findings.reduce((sum, finding) => sum + Math.max(0, finding.score), 0);
+}
+
+async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizations) {
+  try {
+    const trust = await verifier(file, result.sha256);
+    if (!trust || typeof trust !== 'object') return;
+    result.trust = {
+      status: String(trust.status ?? 'unknown').slice(0, 80),
+      subject: String(trust.subject ?? '').slice(0, 500),
+      organization: String(trust.organization ?? '').slice(0, 200),
+      isOsBinary: trust.isOsBinary === true
+    };
+    const organization = normalizePublisher(result.trust.organization);
+    const lowConfidenceOnly = result.findings.every(finding =>
+      finding.id === 'heuristic.entropy' || finding.id === 'heuristic.pe-api-combination'
+    );
+    const trustedSigner = result.trust.isOsBinary || trustedOrganizations.has(organization);
+    if (result.trust.status === 'valid' && trustedSigner && lowConfidenceOnly) {
+      const discount = heuristicScore(result);
+      const publisher = result.trust.organization || (result.trust.isOsBinary ? 'Microsoft Windows OS binary' : 'trusted publisher');
+      if (discount > 0) addFinding(result, 'trust.authenticode', `Valid signature from trusted publisher: ${publisher}`, -discount);
+    }
+  } catch {
+    // Signature verification is enrichment. Failure must not make a file clean
+    // or turn an otherwise successful content scan into an operational error.
+  }
+}
+
+function normalizePublisher(value) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function elapsed(started) {

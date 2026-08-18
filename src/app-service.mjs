@@ -6,6 +6,7 @@ import { Quarantine } from './quarantine.mjs';
 import { createHarmlessSimulation } from './simulator.mjs';
 import { WatchService } from './watch-service.mjs';
 import { discoverWindowsDriveRoots } from './drive-roots.mjs';
+import { createAuthenticodeVerifier } from './authenticode.mjs';
 import { loadJson, pathExists } from './util.mjs';
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -66,6 +67,7 @@ export class AppService {
     this.engine = new ScanEngine({
       ...this.config,
       definitions: this.definitions,
+      trustVerifier: createAuthenticodeVerifier(),
       excludePaths: [canonicalQuarantineDirectory, quarantineDirectory],
       isTransientPath: candidate => this.quarantine.isTransientPath(candidate)
     });
