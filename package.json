@@ -1,0 +1,17 @@
+{
+  "name": "aegis-guard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Defensive Windows malware scanner and quarantine engine",
+  "type": "module",
+  "bin": { "aegis": "./src/cli.mjs" },
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "demo": "node src/cli.mjs demo",
+    "test": "node --test",
+    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/quarantine.mjs && node --check src/simulator.mjs",
+    "ci": "npm run check && npm test"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}
