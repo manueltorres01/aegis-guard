@@ -1,0 +1,7 @@
+{
+  "threshold": 60,
+  "maxFileSizeMb": 128,
+  "concurrency": 4,
+  "exclude": ["node_modules", ".git", ".aegis-quarantine", "$Recycle.Bin", "System Volume Information"],
+  "quarantineDirectory": ".aegis-quarantine"
+}
