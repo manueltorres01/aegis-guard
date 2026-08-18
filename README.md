@@ -26,7 +26,7 @@ Aegis Guard is an auditable, dependency-free malware scanning MVP for Windows. I
 ## Quick start
 
 ```powershell
-git clone https://github.com/YOUR-USERNAME/aegis-guard.git
+git clone https://github.com/manueltorres01/aegis-guard.git
 cd aegis-guard
 npm ci
 npm test
