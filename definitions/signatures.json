@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "generatedAt": "2026-08-18T00:00:00.000Z",
+  "sha256": {},
+  "patterns": [
+    {
+      "id": "test.eicar",
+      "name": "EICAR antivirus test file",
+      "literalBase64": "WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo=",
+      "score": 100
+    },
+    {
+      "id": "test.aegis-simulation",
+      "name": "Aegis harmless malware simulation",
+      "literalBase64": "QUVHSVMtR1VBUkQtSEFSTUxFU1MtU0lNVUxBVElPTi04RjFDMkE3RS1ETy1OT1QtRVhFQ1VURQ==",
+      "score": 100
+    }
+  ]
+}
