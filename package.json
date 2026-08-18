@@ -5,7 +5,9 @@
   "description": "Auditable Windows malware scanner with a secure desktop interface and encrypted quarantine",
   "type": "module",
   "main": "desktop/main.mjs",
-  "bin": { "aegis": "./src/cli.mjs" },
+  "bin": {
+    "aegis": "./src/cli.mjs"
+  },
   "scripts": {
     "start": "node src/cli.mjs",
     "desktop": "electron .",
@@ -17,8 +19,17 @@
     "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/quarantine.mjs && node --check src/simulator.mjs && node --check src/app-service.mjs && node --check src/drive-roots.mjs && node --check src/internal-paths.mjs && node --check src/watch-service.mjs && node --check desktop/main.mjs && node --check desktop/ipc-contracts.mjs && node --check desktop/scan-worker.mjs && node --check desktop/target-vault.mjs && node --check desktop/update-service.mjs && node --check desktop/preload.cjs && node --check desktop/renderer/app.js",
     "ci": "npm run check && npm test"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "repository": "github:manueltorres01/aegis-guard",
   "homepage": "https://github.com/manueltorres01/aegis-guard",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "electron-updater": "6.8.9"
+  },
+  "devDependencies": {
+    "electron": "43.4.0",
+    "electron-builder": "26.15.7"
+  }
 }
