@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ScanEngine } from './engine.mjs';
+import { validateDefinitions } from './definition-security.mjs';
 import { Quarantine } from './quarantine.mjs';
 import { createHarmlessSimulation } from './simulator.mjs';
 import { WatchService } from './watch-service.mjs';
@@ -10,7 +11,7 @@ import { formatBytes, loadJson } from './util.mjs';
 
 const base = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const config = await loadJson(path.join(base, 'config', 'default.json'));
-const definitions = await loadJson(path.join(base, 'definitions', 'signatures.json'));
+const definitions = validateDefinitions(await loadJson(path.join(base, 'definitions', 'signatures.json')));
 const engine = new ScanEngine({ ...config, definitions });
 const quarantine = new Quarantine(process.env.AEGIS_QUARANTINE || path.join(base, config.quarantineDirectory));
 const [command = 'help', target = '.', ...flags] = process.argv.slice(2);

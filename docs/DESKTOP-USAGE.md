@@ -13,6 +13,18 @@ Events are compared with `definitions/network-indicators.json`. The bundled list
 
 This is endpoint visibility, not DDoS protection. A desktop application cannot absorb an upstream volumetric attack after the connection is saturated; that mitigation belongs at the router, ISP, hosting provider or scrubbing/CDN service.
 
+## Deeper static inspection (0.4.0)
+
+Aegis reads PE headers, section tables, entry-point placement and import-library names with explicit offset and section-count bounds. Writable/executable sections and packed-file entropy are low-confidence evidence: a valid signature from an exact trusted publisher or verified application policy can neutralize only those low-confidence findings. Invalid PE structure, exact signatures, archive-bomb declarations and script behavior are not allowlisted merely because a file is installed under a familiar directory.
+
+ZIP-family containers are inspected from bounded central-directory metadata without executing or extracting their contents. Aegis reports declared entry counts, aggregate sizes, extreme compression ratios, embedded executable counts and Office VBA projects. It recognizes 7z, RAR and MSI container headers, but recursive content decoding for those formats is not yet included; they are not presented as fully inspected. Script obfuscation requires combined evidence such as a long encoded payload plus dynamic execution, reducing matches on ordinary source text.
+
+Definitions accept exact SHA-256 indicators, PUA hashes and a constrained YARA-compatible hex-string form with `??` byte wildcards. The signed-definition envelope verifies Ed25519 signatures and rejects a version below the stored minimum. The bundled definitions are protected by Electron ASAR integrity; a production remote update feed and its offline root-key ceremony remain a release-gate item, so Aegis does not claim that local definitions are current threat intelligence.
+
+Potentially unwanted applications are labeled separately and remain a suspicious review result rather than confirmed malware unless an independent exact malware signature also matches. Complete JSON and CSV reports include this classification, bounded structural metadata, certificate-chain status and timestamp evidence.
+
+Authenticode verification records the signer, signature type, certificate validity, thumbprint, chain/revocation status and timestamp certificate when Windows exposes them. Windows catalog-backed status is obtained through `Get-AuthenticodeSignature`; inability to retrieve revocation data is retained as evidence and never silently changes a malicious result to clean. NTFS internet-zone metadata is recorded when a `Zone.Identifier` stream exists. General alternate-stream enumeration is still pending because it requires a bounded native Windows broker rather than one PowerShell process per scanned file.
+
 ## Protection for Downloads
 
 Every new desktop session starts a watcher for the Windows **Downloads**

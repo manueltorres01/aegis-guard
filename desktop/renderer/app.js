@@ -495,7 +495,7 @@ function renderResults() {
     const verdictCell = document.createElement('td');
     const pill = document.createElement('span');
     pill.className = `verdict-pill ${verdict}`;
-    pill.textContent = verdictLabel(verdict);
+    pill.textContent = result.classification === 'pua' ? 'Aplicación no deseada' : verdictLabel(verdict);
     verdictCell.append(pill);
 
     const fileCell = document.createElement('td');

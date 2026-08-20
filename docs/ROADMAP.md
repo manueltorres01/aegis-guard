@@ -41,6 +41,8 @@ Implementation boundary: 0.3.0 provides local diagnostics and recovery history b
 - Office macro, script-obfuscation and NTFS alternate-data-stream inspection.
 - Potentially unwanted application classification separate from malware.
 
+Implementation boundary: 0.4.0 ships bounded PE structure/import parsing, ZIP central-directory and Office macro metadata, compound script-obfuscation checks, Authenticode chain/timestamp evidence, constrained YARA-compatible hex strings, signed-envelope/rollback primitives and separate PUA results. 7z, RAR and MSI are identified but their contents are not yet recursively decoded. General NTFS alternate-stream enumeration, production signing-key operations and remote signed-definition delivery remain hardening work; the UI and reports must not describe those files as fully inspected.
+
 ## 0.5.0 — Ransomware protection
 
 - Controlled-folder protection introduced in audit mode.

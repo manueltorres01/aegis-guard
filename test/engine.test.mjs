@@ -148,3 +148,31 @@ test('verified application trust requires both the expected publisher and instal
   assert.equal(outside.verdict, 'suspicious');
   assert.equal(outside.trust.applicationVerified, false);
 });
+
+test('classifies a PUA separately and does not promote it to confirmed malware', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-pua-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'bundle.exe');
+  const content = Buffer.from('ordinary optional bundle');
+  await fs.writeFile(sample, content);
+  const sha256 = (await import('node:crypto')).createHash('sha256').update(content).digest('hex');
+  const engine = new ScanEngine({
+    definitions: { sha256: {}, puaSha256: { [sha256]: 'Bundled optional software' }, patterns: [] },
+    threshold: 60,
+    maxFileSizeMb: 1
+  });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.classification, 'pua');
+  assert.equal(result.verdict, 'suspicious');
+  assert.ok(result.findings.some(item => item.id === 'pua.sha256'));
+});
+
+test('matches a YARA-compatible hex string with bounded wildcards', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-yara-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'sample.bin');
+  await fs.writeFile(sample, Buffer.from([0x41, 0x4d, 0x5a, 0x90, 0x00, 0x42]));
+  const engine = new ScanEngine({ definitions: { sha256: {}, patterns: [{ id: 'hex.demo', name: 'Hex demo', hex: '4D 5A ?? 00', score: 100 }] }, maxFileSizeMb: 1 });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.verdict, 'malicious');
+});

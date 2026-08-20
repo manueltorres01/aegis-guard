@@ -109,3 +109,9 @@ test('0.3.0 exposes background tray, authenticated diagnostics and scheduled sca
   assert.match(desktopMain,/powerMonitor\.isOnBatteryPower/);
   assert.match(desktopMain,/signWorkerMessage/);
 });
+
+test('0.4.0 presents PUA separately from confirmed malware', async () => {
+  const app = await fs.readFile(new URL('../desktop/renderer/app.js', import.meta.url), 'utf8');
+  assert.match(app, /classification === 'pua'/);
+  assert.match(app, /Aplicación no deseada/);
+});

@@ -7,9 +7,11 @@ Aegis Guard is an auditable malware-scanning MVP for Windows with both a command
 
 ## Highlights
 
-- SHA-256 and encoded literal signatures
+- SHA-256, encoded literal and constrained YARA-compatible hex signatures
 - Explainable detection scoring
 - Heuristics for disguised executables, suspicious scripts, macro auto-execution, ransomware commands and packed files
+- Bounded PE structural analysis, ZIP/Office metadata inspection and separate PUA classification
+- Authenticode publisher, chain/revocation evidence, timestamp identity and application provenance
 - Concurrent directory scanning with safe exclusions and symbolic-link avoidance
 - Modern Spanish desktop dashboard with light, dark and system themes
 - Cancelable scans with discovery and scanning progress
@@ -41,7 +43,7 @@ The demo creates a plain-text simulation in the operating system's temporary dir
 
 ## Desktop interface
 
-The interface includes **Inicio**, **Analizar**, **Protección**, **Resultados**, **Cuarentena** and **Ajustes**. It deliberately says “Sin amenazas detectadas por Aegis” instead of claiming that the whole computer is protected. Folder monitoring works only while Aegis Guard remains open.
+The interface includes **Inicio**, **Analizar**, **Protección**, **Resultados**, **Cuarentena** and **Ajustes**. It deliberately says “Sin amenazas detectadas por Aegis” instead of claiming that the whole computer is protected. Folder monitoring continues in the user session when the window is hidden to the Windows tray.
 
 Review the interface without Electron or access to real files:
 

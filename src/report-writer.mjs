@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const CSV_COLUMNS = ['path', 'verdict', 'score', 'size', 'sha256', 'reason', 'error', 'action', 'signatureStatus', 'publisher', 'companyName', 'productName', 'fileVersion', 'origin', 'zoneId', 'verifiedApplication', 'certificateSubject', 'trustReason'];
+const CSV_COLUMNS = ['path', 'verdict', 'classification', 'score', 'size', 'sha256', 'reason', 'error', 'action', 'signatureStatus', 'signatureType', 'publisher', 'companyName', 'productName', 'fileVersion', 'origin', 'zoneId', 'verifiedApplication', 'chainValid', 'chainStatus', 'timestamped', 'certificateThumbprint', 'certificateSubject', 'trustReason', 'staticAnalysis'];
 
 export class ScanReportWriter {
   constructor({ directory, scanId, mode, target, startedAt }) {
@@ -81,6 +81,7 @@ function normalizeResult(result = {}) {
   const trustFinding = findings.find(finding => finding?.id === 'trust.authenticode');
   return {
     path: String(result.path ?? ''), verdict: String(result.verdict ?? 'error'),
+    classification: String(result.classification ?? 'malware'),
     score: Number.isFinite(result.score) ? result.score : 0,
     size: Number.isFinite(result.size) ? result.size : null,
     sha256: typeof result.sha256 === 'string' ? result.sha256 : null,
@@ -88,11 +89,17 @@ function normalizeResult(result = {}) {
     findings: findings.map(finding => ({ id: String(finding?.id ?? ''), description: String(finding?.description ?? ''), score: Number.isFinite(finding?.score) ? finding.score : 0 })),
     error: result.error ? String(result.error) : '', action: String(result.action ?? ''),
     signatureStatus: String(result.trust?.status ?? ''), publisher: String(result.trust?.organization ?? ''),
+    signatureType: String(result.trust?.signatureType ?? ''),
     companyName: String(result.trust?.companyName ?? ''), productName: String(result.trust?.productName ?? ''),
     fileVersion: String(result.trust?.fileVersion ?? ''), origin: String(result.trust?.origin ?? ''),
     zoneId: Number.isSafeInteger(result.trust?.zoneId) ? result.trust.zoneId : null,
     verifiedApplication: result.trust?.applicationVerified === true,
-    certificateSubject: String(result.trust?.subject ?? ''), trustReason: String(trustFinding?.description ?? '')
+    chainValid: result.trust?.chainValid === true,
+    chainStatus: Array.isArray(result.trust?.chainStatus) ? result.trust.chainStatus : [],
+    timestamped: result.trust?.timestamped === true,
+    certificateThumbprint: String(result.trust?.thumbprint ?? ''),
+    certificateSubject: String(result.trust?.subject ?? ''), trustReason: String(trustFinding?.description ?? ''),
+    staticAnalysis: result.staticAnalysis && typeof result.staticAnalysis === 'object' ? result.staticAnalysis : {}
   };
 }
 

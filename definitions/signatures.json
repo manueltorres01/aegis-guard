@@ -1,7 +1,8 @@
 {
-  "version": 2,
-  "generatedAt": "2026-08-18T00:00:00.000Z",
+  "version": 3,
+  "generatedAt": "2026-08-20T00:00:00.000Z",
   "sha256": {},
+  "puaSha256": {},
   "patterns": [
     {
       "id": "test.eicar",

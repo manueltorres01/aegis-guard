@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { analyzeStaticContent } from './static-analysis.mjs';
 
 const EXECUTABLE = new Set(['.exe', '.dll', '.scr', '.com', '.msi', '.jar', '.ps1', '.vbs', '.js', '.jse', '.bat', '.cmd', '.hta']);
 const SCRIPT = new Set(['.ps1', '.vbs', '.js', '.jse', '.bat', '.cmd', '.hta']);
@@ -14,10 +15,18 @@ const SCRIPT_RULES = [
   [/(?:rundll32|regsvr32|mshta)\.exe\s+(?:https?:|javascript:)/i, 40, 'Living-off-the-land remote execution']
 ];
 const INJECTION_APIS = ['createremotethread', 'virtualallocex', 'writeprocessmemory'];
+const TRUST_DISCOUNTABLE = new Set([
+  'heuristic.entropy',
+  'heuristic.pe-api-combination',
+  'static.pe.rwx-section',
+  'static.pe.writable-entry'
+]);
 
 const DEFAULT_STREAM_CHUNK_BYTES = 1024 * 1024;
 const ENTROPY_SAMPLE_BYTES = 1024 * 1024;
 const SCRIPT_OVERLAP_BYTES = 4 * 1024;
+const STATIC_HEAD_BYTES = 8 * 1024 * 1024;
+const STATIC_TAIL_BYTES = 512 * 1024;
 
 function entropy(buffer) {
   if (!buffer.length) return 0;
@@ -55,9 +64,7 @@ export class ScanEngine {
     this.trustedApplicationPolicies = normalizeApplicationPolicies(trustedApplicationPolicies);
     this.patternRules = (definitions.patterns ?? []).map(rule => ({
       ...rule,
-      bytes: rule.literalBase64
-        ? Buffer.from(rule.literalBase64, 'base64')
-        : Buffer.from(String(rule.literal ?? ''), 'latin1')
+      ...compileDefinitionPattern(rule)
     })).filter(rule => rule.bytes.length > 0);
     this.patternOverlapBytes = Math.max(0, ...this.patternRules.map(rule => rule.bytes.length - 1));
   }
@@ -107,6 +114,9 @@ export class ScanEngine {
       const entropySample = executable
         ? Buffer.allocUnsafe(Math.min(openedStat.size, ENTROPY_SAMPLE_BYTES))
         : null;
+      const staticHead = Buffer.allocUnsafe(Math.min(openedStat.size, STATIC_HEAD_BYTES));
+      let staticHeadLength = 0;
+      let staticTail = Buffer.alloc(0);
       const matchedPatterns = new Set();
       const matchedScripts = new Set();
       const matchedInjectionApis = new Set();
@@ -128,10 +138,16 @@ export class ScanEngine {
           chunk.copy(entropySample, entropyLength, 0, copied);
           entropyLength += copied;
         }
+        if (staticHeadLength < staticHead.length) {
+          const copied = Math.min(chunk.length, staticHead.length - staticHeadLength);
+          chunk.copy(staticHead, staticHeadLength, 0, copied);
+          staticHeadLength += copied;
+        }
+        staticTail = retainTail(staticTail, chunk, STATIC_TAIL_BYTES);
 
         const window = tail.length ? Buffer.concat([tail, chunk]) : chunk;
         for (let index = 0; index < this.patternRules.length; index++) {
-          if (!matchedPatterns.has(index) && window.includes(this.patternRules[index].bytes)) matchedPatterns.add(index);
+          if (!matchedPatterns.has(index) && patternMatches(window, this.patternRules[index])) matchedPatterns.add(index);
         }
         if (script || peLike) {
           const latin = window.toString('latin1');
@@ -174,6 +190,14 @@ export class ScanEngine {
       if (sample.length > 4096 && entropy(sample) > 7.65) {
         addFinding(result, 'heuristic.entropy', 'Unusually high entropy; file may be packed or encrypted', 18);
       }
+      const staticAnalysis = analyzeStaticContent({
+        file,
+        head: staticHead.subarray(0, staticHeadLength),
+        tail: staticTail
+      });
+      result.staticAnalysis = staticAnalysis.metadata;
+      for (const finding of staticAnalysis.findings) addFinding(result, finding.id, finding.description, finding.score);
+      applyPuaClassification(result, this.definitions);
       if (peLike && this.trustVerifier && heuristicScore(result) >= 25) {
         await applyAuthenticodeTrust(result, file, this.trustVerifier, this.trustedPublisherOrganizations, this.trustedApplicationPolicies);
       }
@@ -481,8 +505,18 @@ function finalizeResult(result, started, definitions, threshold) {
   if (known) addFinding(result, 'signature.sha256', known, 100);
   result.score = Math.max(0, Math.min(100, result.findings.reduce((sum, finding) => sum + finding.score, 0)));
   result.verdict = result.score >= threshold ? 'malicious' : result.score >= 25 ? 'suspicious' : 'clean';
+  if (result.classification === 'pua' && result.verdict === 'malicious' && !result.findings.some(finding => finding.id === 'signature.sha256')) result.verdict = 'suspicious';
   result.durationMs = elapsed(started);
   return result;
+}
+
+function applyPuaClassification(result, definitions) {
+  const matches = Array.isArray(definitions.puaSha256?.[result.sha256])
+    ? definitions.puaSha256[result.sha256]
+    : definitions.puaSha256?.[result.sha256] ? [definitions.puaSha256[result.sha256]] : [];
+  if (!matches.length) return;
+  result.classification = 'pua';
+  for (const description of matches.slice(0, 8)) addFinding(result, 'pua.sha256', String(description).slice(0, 500), 35);
 }
 
 function heuristicScore(result) {
@@ -498,6 +532,15 @@ async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizatio
       subject: String(trust.subject ?? '').slice(0, 500),
       organization: String(trust.organization ?? '').slice(0, 200),
       isOsBinary: trust.isOsBinary === true,
+      statusMessage: String(trust.statusMessage ?? '').slice(0, 300),
+      signatureType: String(trust.signatureType ?? '').slice(0, 80),
+      thumbprint: String(trust.thumbprint ?? '').slice(0, 100),
+      notBefore: String(trust.notBefore ?? '').slice(0, 80),
+      notAfter: String(trust.notAfter ?? '').slice(0, 80),
+      chainValid: trust.chainValid === true,
+      chainStatus: Array.isArray(trust.chainStatus) ? trust.chainStatus.map(value => String(value).slice(0, 80)).slice(0, 16) : [],
+      timestamped: trust.timestamped === true,
+      timestampSubject: String(trust.timestampSubject ?? '').slice(0, 500),
       companyName: String(trust.companyName ?? '').slice(0, 200),
       productName: String(trust.productName ?? '').slice(0, 200),
       fileVersion: String(trust.fileVersion ?? '').slice(0, 100),
@@ -505,9 +548,7 @@ async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizatio
       origin: classifyOrigin(file)
     };
     const organization = normalizePublisher(result.trust.organization);
-    const lowConfidenceOnly = result.findings.every(finding =>
-      finding.id === 'heuristic.entropy' || finding.id === 'heuristic.pe-api-combination'
-    );
+    const lowConfidenceOnly = result.findings.every(finding => TRUST_DISCOUNTABLE.has(finding.id));
     const trustedApplication = trustedApplications.some(policy =>
       policy.publisher === organization && policy.roots.some(root => isPathWithin(root, file))
     );
@@ -604,4 +645,37 @@ function normalizePathKey(value) {
   const root = path.parse(resolved).root;
   const withoutTrailing = resolved === root ? resolved : resolved.replace(/[\\/]+$/, '');
   return process.platform === 'win32' ? withoutTrailing.toLowerCase() : withoutTrailing;
+}
+
+function retainTail(previous, chunk, maximum) {
+  if (chunk.length >= maximum) return Buffer.from(chunk.subarray(chunk.length - maximum));
+  const combined = previous.length ? Buffer.concat([previous, chunk]) : Buffer.from(chunk);
+  return combined.length <= maximum ? combined : Buffer.from(combined.subarray(combined.length - maximum));
+}
+
+function compileDefinitionPattern(rule) {
+  if (typeof rule.hex === 'string') {
+    const tokens = rule.hex.trim().split(/\s+/);
+    return {
+      bytes: Buffer.from(tokens.map(token => token === '??' ? 0 : Number.parseInt(token, 16))),
+      mask: Buffer.from(tokens.map(token => token === '??' ? 0 : 0xff))
+    };
+  }
+  return {
+    bytes: rule.literalBase64
+      ? Buffer.from(rule.literalBase64, 'base64')
+      : Buffer.from(String(rule.literal ?? ''), 'latin1'),
+    mask: null
+  };
+}
+
+function patternMatches(buffer, rule) {
+  if (!rule.mask) return buffer.includes(rule.bytes);
+  outer: for (let offset = 0; offset <= buffer.length - rule.bytes.length; offset++) {
+    for (let index = 0; index < rule.bytes.length; index++) {
+      if (rule.mask[index] && buffer[offset + index] !== rule.bytes[index]) continue outer;
+    }
+    return true;
+  }
+  return false;
 }

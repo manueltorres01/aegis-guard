@@ -10,6 +10,7 @@ import { createAuthenticodeVerifier } from './authenticode.mjs';
 import { ScanReportWriter } from './report-writer.mjs';
 import { NetworkAuditor, writeNetworkReport } from './network-audit.mjs';
 import { loadJson, pathExists } from './util.mjs';
+import { validateDefinitions } from './definition-security.mjs';
 
 const DEFAULT_SETTINGS = Object.freeze({
   theme: 'system',
@@ -57,7 +58,7 @@ export class AppService {
   async init() {
     await fsp.mkdir(this.dataDirectory, { recursive: true });
     this.config = await loadJson(path.join(this.baseDirectory, 'config', 'default.json'));
-    this.definitions = await loadJson(path.join(this.baseDirectory, 'definitions', 'signatures.json'));
+    this.definitions = validateDefinitions(await loadJson(path.join(this.baseDirectory, 'definitions', 'signatures.json')));
     this.networkIndicators = await loadJson(path.join(this.baseDirectory, 'definitions', 'network-indicators.json'));
     const packageInfo = await loadJson(path.join(this.baseDirectory, 'package.json'));
     this.version = packageInfo.version;
