@@ -103,3 +103,19 @@ test('completed restore and real-time detections survive state persistence failu
   assert.ok(events.filter(event => event.type === 'scan-warning' && event.payload.code === 'STATE_NOT_PERSISTED').length >= 2);
   assert.equal(report.summary.quarantined, 1);
 });
+
+test('startup recovers an interrupted scan journal and reports degraded health', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-recovery-'));
+  t.after(() => fs.rm(root, { recursive:true, force:true }));
+  const dataDirectory = path.join(root, 'data'); const downloadsDirectory = path.join(root, 'downloads');
+  await fs.mkdir(dataDirectory, {recursive:true}); await fs.mkdir(downloadsDirectory, {recursive:true});
+  await fs.writeFile(path.join(dataDirectory,'state.json'), JSON.stringify({activeOperation:{kind:'scan',scanId:'76d2809c-2614-45df-908f-587506ab3949',mode:'full',startedAt:'2026-08-20T01:00:00.000Z'},activity:[]}));
+  const service = new AppService({baseDirectory:path.resolve('.'),dataDirectory,downloadsDirectory});
+  t.after(() => service.shutdown());
+  const bootstrap = await service.init();
+  assert.equal(bootstrap.health.status,'degraded');
+  assert.equal(bootstrap.health.recoveredInterruptedOperation,true);
+  assert.equal(bootstrap.activity[0].type,'recovery');
+  const stored=JSON.parse(await fs.readFile(path.join(dataDirectory,'state.json'),'utf8'));
+  assert.equal(stored.activeOperation,null);
+});

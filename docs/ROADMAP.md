@@ -24,11 +24,13 @@ Implementation note: the local indicator file intentionally ships empty until a 
 
 ## 0.3.0 — Durable endpoint foundation
 
-- Least-privilege Windows service so protection continues when the UI closes.
-- Signed IPC protocol between service and desktop UI.
+- User-session background agent and Windows tray so closing the UI does not stop protection; a true least-privilege Windows SCM service remains a post-0.3.0 hardening gate.
+- HMAC-authenticated IPC protocol between the desktop broker and isolated scan worker.
 - Scheduled Quick, Deep and Full scans with battery/CPU limits and game/silent modes.
 - Reliable crash recovery for scans, reports, quarantine and updates.
 - Event-log integration, health diagnostics and clear degraded-protection states.
+
+Implementation boundary: 0.3.0 provides local diagnostics and recovery history but does not register an Event Log source or Windows service because doing either correctly requires an elevated, signed installation path and tested service ACL/upgrade design. These remain mandatory before commercial readiness.
 
 ## 0.4.0 — Deeper static detection
 

@@ -6,9 +6,11 @@ import {
   serializeError
 } from './ipc-contracts.mjs';
 import { AppService } from '../src/app-service.mjs';
+import { signWorkerMessage, verifyWorkerMessage } from './ipc-auth.mjs';
 
 const MAX_REPORT_RESULTS = 5_000;
 const parentPort = process.parentPort;
+const authKey = process.env.AEGIS_WORKER_AUTH_KEY;
 
 if (!parentPort) throw new Error('Aegis scan worker must be started as an Electron utility process');
 
@@ -26,7 +28,9 @@ post({ kind: 'ready', protocolVersion: WORKER_PROTOCOL_VERSION });
 async function handleMessage(raw) {
   let request;
   try {
-    request = parseWorkerRequest(raw);
+    const verified = verifyWorkerMessage(raw, authKey);
+    if (!verified) throw operationError('WORKER_AUTH_FAILED', 'Unauthenticated worker request');
+    request = parseWorkerRequest(verified);
     const payload = parseWorkerActionPayload(request.action, request.payload);
     const result = await dispatch(request.action, payload);
     post({ kind: 'response', id: request.id, ok: true, result: limitLargeReports(result) });
@@ -135,7 +139,7 @@ function limitLargeReports(value) {
 
 function post(message) {
   if (shuttingDown && message.kind === 'event') return;
-  parentPort.postMessage(message);
+  parentPort.postMessage(signWorkerMessage(message, authKey));
 }
 
 function operationError(code, message) {

@@ -147,7 +147,7 @@ Aegis does not yet include a signed Windows minifilter driver, background Window
 
 ## Roadmap
 
-Version 0.2.3 includes every 0.2.2 improvement and adds a bounded, read-only Windows network audit: outbound TCP destination/process attribution, Authenticode publisher evidence, local domain/IP indicator matching, DNS-cache correlation, Firewall/Defender state and native JSON/CSV export. It neither blocks traffic nor claims volumetric-DDoS mitigation. The ordered security and commercialization plan through 1.0.0 is maintained in [docs/ROADMAP.md](docs/ROADMAP.md).
+Version 0.3.0 includes every earlier improvement and adds authenticated worker IPC, interrupted-scan recovery, health diagnostics, daily Quick/Full scheduling with a battery guard, user-session background protection through the Windows tray, richer signed-file provenance, and separate quarantine **Path** and original-location **Restore** actions. It remains a user-session agent rather than a Windows SCM service; that privileged installation boundary must not be claimed until its installer, account ACLs and upgrade recovery have been independently validated. The ordered security and commercialization plan through 1.0.0 is maintained in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Security and contributing
 

@@ -375,6 +375,13 @@
                   <span class="toggle" aria-hidden="true"></span>
                 </label>
               </article>
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon blue"><svg aria-hidden="true"><use href="#i-clock"/></svg></span><div><h3>Análisis programado</h3><p>Se ejecuta mientras Aegis permanece activo en segundo plano.</p></div></div>
+                <label class="toggle-row" for="scheduled-scan-enabled"><span><strong>Activar programación diaria</strong><small>Desactivada por defecto.</small></span><input id="scheduled-scan-enabled" type="checkbox" role="switch"><span class="toggle" aria-hidden="true"></span></label>
+                <label class="field-label" for="scheduled-scan-mode">Tipo</label><select id="scheduled-scan-mode"><option value="quick">Rápido</option><option value="full">Completo</option></select>
+                <label class="field-label" for="scheduled-scan-hour">Hora</label><select id="scheduled-scan-hour"></select>
+                <label class="toggle-row" for="scheduled-scan-battery"><span><strong>Omitir usando batería</strong><small>Evita iniciar el análisis sin alimentación externa.</small></span><input id="scheduled-scan-battery" type="checkbox" role="switch" checked><span class="toggle" aria-hidden="true"></span></label>
+              </article>
             </div>
 
             <div class="settings-stack">
@@ -393,6 +400,14 @@
               <article class="card settings-card test-card">
                 <div class="settings-card-title"><span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-play"/></svg></span><div><h3>Prueba segura</h3><p>Crea un archivo de texto inofensivo para verificar detección y cuarentena. No contiene código ejecutable.</p></div></div>
                 <button class="button secondary full-width" id="run-simulation" type="button">Ejecutar simulación inofensiva</button>
+              </article>
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon green"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Diagnóstico de protección</h3><p id="health-summary">Comprobando componentes internos.</p></div></div>
+                <dl class="version-list">
+                  <div><dt>IPC del motor</dt><dd id="health-ipc">—</dd></div>
+                  <div><dt>Vigilancia</dt><dd id="health-protection">—</dd></div>
+                  <div><dt>Persistencia</dt><dd id="health-persistence">—</dd></div>
+                </dl>
               </article>
             </div>
           </div>

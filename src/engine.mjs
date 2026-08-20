@@ -497,7 +497,12 @@ async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizatio
       status: String(trust.status ?? 'unknown').slice(0, 80),
       subject: String(trust.subject ?? '').slice(0, 500),
       organization: String(trust.organization ?? '').slice(0, 200),
-      isOsBinary: trust.isOsBinary === true
+      isOsBinary: trust.isOsBinary === true,
+      companyName: String(trust.companyName ?? '').slice(0, 200),
+      productName: String(trust.productName ?? '').slice(0, 200),
+      fileVersion: String(trust.fileVersion ?? '').slice(0, 100),
+      zoneId: Number.isSafeInteger(trust.zoneId) ? trust.zoneId : null,
+      origin: classifyOrigin(file)
     };
     const organization = normalizePublisher(result.trust.organization);
     const lowConfidenceOnly = result.findings.every(finding =>
@@ -518,6 +523,17 @@ async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizatio
     // Signature verification is enrichment. Failure must not make a file clean
     // or turn an otherwise successful content scan into an operational error.
   }
+}
+
+function classifyOrigin(file) {
+  const policies = [
+    ['windows', process.env.SystemRoot],
+    ['program-files', process.env.ProgramFiles],
+    ['program-files-x86', process.env['ProgramFiles(x86)']],
+    ['installed-user-application', process.env.LOCALAPPDATA]
+  ];
+  for (const [label, root] of policies) if (root && isPathWithin(root, file)) return label;
+  return 'other';
 }
 
 function normalizePublisher(value) {

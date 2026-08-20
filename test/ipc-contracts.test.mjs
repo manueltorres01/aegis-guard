@@ -79,6 +79,13 @@ test('settings contract accepts only a boolean launchAtStartup value', () => {
   assert.throws(() => parseSettings({ launchAtStartup: 'true' }), ContractError);
 });
 
+test('scheduled scan settings are bounded and battery-safe', () => {
+  assert.deepEqual(parseSettings({scheduledScanEnabled:true,scheduledScanMode:'full',scheduledScanHour:23,skipScheduledScanOnBattery:true}), {scheduledScanEnabled:true,scheduledScanMode:'full',scheduledScanHour:23,skipScheduledScanOnBattery:true});
+  assert.throws(() => parseSettings({scheduledScanMode:'deep'}), ContractError);
+  assert.throws(() => parseSettings({scheduledScanHour:24}), ContractError);
+  assert.throws(() => parseSettings({skipScheduledScanOnBattery:'yes'}), ContractError);
+});
+
 test('report export contracts accept only JSON and CSV', () => {
   assert.deepEqual(parseExportReport({ format: 'json' }), { format: 'json' });
   assert.deepEqual(parseWorkerActionPayload(WORKER_ACTIONS.getLatestReport, { format: 'csv' }), { format: 'csv' });

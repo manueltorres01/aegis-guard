@@ -85,3 +85,27 @@ test('0.2.3 exposes bounded network audit and report export without block contro
   assert.match(source, /runNetworkAudit/);
   assert.match(source, /exportNetworkReport/);
 });
+
+test('0.3.0 quarantine exposes a path action and restores only to the original location', async () => {
+  const [source, desktopMain, preload] = await Promise.all([
+    fs.readFile(rendererFile, 'utf8'), fs.readFile(desktopMainFile, 'utf8'),
+    fs.readFile(new URL('../desktop/preload.cjs', import.meta.url), 'utf8')
+  ]);
+  assert.match(source, /showPath\.textContent = 'Ruta'/);
+  assert.match(source, /restore\.textContent = 'Restaurar'/);
+  assert.match(preload, /showQuarantinePath/);
+  const restoreStart = desktopMain.indexOf('async function restoreQuarantine');
+  const restoreEnd = desktopMain.indexOf('\nasync function ', restoreStart + 1);
+  assert.match(desktopMain.slice(restoreStart, restoreEnd), /metadata\.originalPath/);
+  assert.doesNotMatch(desktopMain.slice(restoreStart, restoreEnd), /showSaveDialog/);
+});
+
+test('0.3.0 exposes background tray, authenticated diagnostics and scheduled scan controls', async () => {
+  const [source, html, desktopMain] = await Promise.all([fs.readFile(rendererFile,'utf8'),fs.readFile(rendererHtmlFile,'utf8'),fs.readFile(desktopMainFile,'utf8')]);
+  for (const id of ['scheduled-scan-enabled','scheduled-scan-mode','scheduled-scan-hour','scheduled-scan-battery','health-summary']) assert.match(html,new RegExp(`id="${id}"`));
+  assert.match(source,/syncScheduleSettings/);
+  assert.match(desktopMain,/new Tray/);
+  assert.match(desktopMain,/checkScheduledScan/);
+  assert.match(desktopMain,/powerMonitor\.isOnBatteryPower/);
+  assert.match(desktopMain,/signWorkerMessage/);
+});

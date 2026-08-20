@@ -14,7 +14,7 @@ const VIEW_META = Object.freeze({
 
 const state = {
   activeView: 'home',
-  settings: { theme: 'system', autoQuarantine: false, launchAtStartup: true },
+  settings: { theme: 'system', autoQuarantine: false, launchAtStartup: true, scheduledScanEnabled: false, scheduledScanMode: 'quick', scheduledScanHour: 3, skipScheduledScanOnBattery: true },
   version: '—',
   engineVersion: '—',
   definitionsVersion: '—',
@@ -22,6 +22,7 @@ const state = {
   resultsTruncated: 0,
   reportAvailable: false,
   network: null,
+  health: { status:'degraded',authenticatedWorkerIpc:false,protectionAvailable:false,statePersistenceAvailable:false,recoveredInterruptedOperation:false },
   quarantine: [],
   quarantineInventory: { total: 0, truncatedCount: 0, corruptCount: 0, oversizedCount: 0 },
   activity: [],
@@ -86,13 +87,20 @@ function cacheElements() {
     'results-body', 'results-empty', 'quarantine-body', 'quarantine-empty', 'refresh-quarantine',
     'quarantine-inventory-warning', 'quarantine-inventory-warning-copy',
     'theme-select', 'auto-quarantine', 'start-with-windows', 'startup-setting-note',
+    'scheduled-scan-enabled', 'scheduled-scan-mode', 'scheduled-scan-hour', 'scheduled-scan-battery',
     'check-updates', 'restart-update', 'update-status', 'run-simulation',
-    'settings-save-status', 'fatal-panel', 'fatal-message', 'toast-region', 'restore-dialog',
+    'settings-save-status', 'health-summary', 'health-ipc', 'health-protection', 'health-persistence', 'fatal-panel', 'fatal-message', 'toast-region', 'restore-dialog',
     'restore-dialog-copy', 'restore-cancel', 'restore-confirm', 'isolate-dialog',
     'isolate-dialog-copy', 'isolate-cancel', 'isolate-confirm', 'pause-protection-dialog',
     'pause-protection-cancel', 'pause-protection-confirm'
   ];
   for (const id of ids) els[id] = byId(id);
+  for (let hour = 0; hour < 24; hour++) {
+    const option = document.createElement('option');
+    option.value = String(hour);
+    option.textContent = `${String(hour).padStart(2, '0')}:00`;
+    els['scheduled-scan-hour'].append(option);
+  }
 }
 
 function createIcon(symbol) {
@@ -440,6 +448,13 @@ function renderStartupSetting() {
   }
 }
 
+function syncScheduleSettings(settings = state.settings) {
+  els['scheduled-scan-enabled'].checked = settings.scheduledScanEnabled === true;
+  els['scheduled-scan-mode'].value = settings.scheduledScanMode === 'full' ? 'full' : 'quick';
+  els['scheduled-scan-hour'].value = String(Number.isSafeInteger(settings.scheduledScanHour) ? settings.scheduledScanHour : 3);
+  els['scheduled-scan-battery'].checked = settings.skipScheduledScanOnBattery !== false;
+}
+
 function resultReason(result) {
   if (safeString(result.reason)) return safeString(result.reason);
   if (safeString(result.error)) return safeString(result.error);
@@ -610,12 +625,17 @@ function renderQuarantine() {
     idCell.title = identifier;
 
     const actionCell = document.createElement('td');
+    const showPath = document.createElement('button');
+    showPath.type = 'button';
+    showPath.className = 'button secondary';
+    showPath.textContent = 'Ruta';
+    showPath.addEventListener('click', () => void callApi('showQuarantinePath', { id: item.id }).catch(error => showToast('No se pudo mostrar la ruta', errorMessage(error), 'error')));
     const restore = document.createElement('button');
     restore.type = 'button';
     restore.className = 'button secondary';
     restore.textContent = 'Restaurar';
     restore.addEventListener('click', () => openRestoreDialog(item));
-    actionCell.append(restore);
+    const actions = document.createElement('div'); actions.className = 'button-row compact-row'; actions.append(showPath, restore); actionCell.append(actions);
     row.append(pathCell, dateCell, verdictCell, idCell, actionCell);
     body.append(row);
   }
@@ -989,7 +1009,7 @@ async function refreshQuarantine({ quiet = false } = {}) {
 function openRestoreDialog(item) {
   state.restoreId = safeString(item?.id);
   if (!state.restoreId) return;
-  els['restore-dialog-copy'].textContent = `Vas a restaurar «${fileName(item.originalPath ?? item.path ?? item.label)}». Elige una ubicación segura y analízalo con Microsoft Defender antes de abrirlo.`;
+  els['restore-dialog-copy'].textContent = `Vas a restaurar «${fileName(item.originalPath ?? item.path ?? item.label)}» exactamente en la ruta desde la que Aegis lo aisló. No se sobrescribirá ningún archivo existente.`;
   els['restore-dialog'].showModal();
 }
 
@@ -1068,7 +1088,11 @@ async function saveSettings() {
   const next = {
     theme: els['theme-select'].value,
     autoQuarantine: Boolean(els['auto-quarantine'].checked),
-    launchAtStartup: Boolean(els['start-with-windows'].checked)
+    launchAtStartup: Boolean(els['start-with-windows'].checked),
+    scheduledScanEnabled: Boolean(els['scheduled-scan-enabled'].checked),
+    scheduledScanMode: els['scheduled-scan-mode'].value,
+    scheduledScanHour: Number(els['scheduled-scan-hour'].value),
+    skipScheduledScanOnBattery: Boolean(els['scheduled-scan-battery'].checked)
   };
   state.settings = next;
   applyTheme(next.theme);
@@ -1090,6 +1114,7 @@ async function saveSettings() {
     state.settings = previous;
     els['theme-select'].value = previous.theme;
     els['auto-quarantine'].checked = previous.autoQuarantine;
+    syncScheduleSettings(previous);
     applyTheme(previous.theme);
     renderStartupSetting();
     els['settings-save-status'].textContent = 'No se pudieron guardar los cambios.';
@@ -1360,10 +1385,15 @@ function handleAppEvent(rawEvent) {
     state.settings = {
       theme: ['system', 'light', 'dark'].includes(event.theme) ? event.theme : state.settings.theme,
       autoQuarantine: event.autoQuarantine === true,
-      launchAtStartup: event.launchAtStartup !== false
+      launchAtStartup: event.launchAtStartup !== false,
+      scheduledScanEnabled: event.scheduledScanEnabled === true,
+      scheduledScanMode: event.scheduledScanMode === 'full' ? 'full' : 'quick',
+      scheduledScanHour: Number.isSafeInteger(event.scheduledScanHour) ? event.scheduledScanHour : 3,
+      skipScheduledScanOnBattery: event.skipScheduledScanOnBattery !== false
     };
     els['theme-select'].value = state.settings.theme;
     els['auto-quarantine'].checked = state.settings.autoQuarantine;
+    syncScheduleSettings(state.settings);
     renderStartupSetting();
     applyTheme(state.settings.theme);
     return;
@@ -1401,7 +1431,11 @@ function normalizeBootstrap(data = {}) {
     settings: {
       theme: ['system', 'light', 'dark'].includes(settings.theme) ? settings.theme : 'system',
       autoQuarantine: settings.autoQuarantine === true,
-      launchAtStartup: settings.launchAtStartup !== false
+      launchAtStartup: settings.launchAtStartup !== false,
+      scheduledScanEnabled: settings.scheduledScanEnabled === true,
+      scheduledScanMode: settings.scheduledScanMode === 'full' ? 'full' : 'quick',
+      scheduledScanHour: Number.isSafeInteger(settings.scheduledScanHour) ? settings.scheduledScanHour : 3,
+      skipScheduledScanOnBattery: settings.skipScheduledScanOnBattery !== false
     },
     quarantine,
     quarantineInventory: {
@@ -1413,6 +1447,7 @@ function normalizeBootstrap(data = {}) {
     results,
     reportAvailable: Boolean(data.reportAvailable),
     network: data.network && typeof data.network === 'object' ? data.network : null,
+    health: data.health && typeof data.health === 'object' ? data.health : {},
     activity: Array.isArray(data.activity ?? data.history) ? (data.activity ?? data.history) : [],
     lastScan,
     totalScanned: safeNumber(stats.totalScanned ?? data.totalScanned ?? persisted.totalScanned ?? getSummary(lastScan ?? {}).scanned),
@@ -1437,6 +1472,7 @@ function applyBootstrap(rawData) {
   state.results = data.results;
   state.reportAvailable = data.reportAvailable;
   state.network = data.network;
+  state.health = data.health;
   state.activity = data.activity;
   state.lastScan = data.lastScan;
   state.totalScanned = data.totalScanned;
@@ -1468,6 +1504,7 @@ function applyBootstrap(rawData) {
   els['about-definitions'].textContent = data.definitionsVersion;
   els['theme-select'].value = data.settings.theme;
   els['auto-quarantine'].checked = data.settings.autoQuarantine;
+  syncScheduleSettings(data.settings);
   renderStartupSetting();
   applyTheme(data.settings.theme);
   renderHomeStatus();
@@ -1477,6 +1514,15 @@ function applyBootstrap(rawData) {
   renderResults();
   renderNetwork();
   renderQuarantine();
+  renderHealth();
+}
+
+function renderHealth() {
+  const health = state.health ?? {};
+  els['health-summary'].textContent = health.status === 'healthy' ? 'Los componentes supervisados funcionan correctamente.' : health.recoveredInterruptedOperation ? 'Aegis recuperó una operación interrumpida; revisa el último informe.' : 'Hay componentes que requieren revisión.';
+  els['health-ipc'].textContent = health.authenticatedWorkerIpc ? 'Autenticado' : 'No disponible';
+  els['health-protection'].textContent = health.protectionAvailable ? 'Disponible' : 'Degradada';
+  els['health-persistence'].textContent = health.statePersistenceAvailable ? 'Disponible' : 'Degradada';
 }
 
 function bindEvents() {
@@ -1512,6 +1558,9 @@ function bindEvents() {
   els['theme-select'].addEventListener('change', () => void saveSettings());
   els['auto-quarantine'].addEventListener('change', () => void saveSettings());
   els['start-with-windows'].addEventListener('change', () => void saveSettings());
+  for (const id of ['scheduled-scan-enabled', 'scheduled-scan-mode', 'scheduled-scan-hour', 'scheduled-scan-battery']) {
+    els[id].addEventListener('change', () => void saveSettings());
+  }
   els['theme-cycle'].addEventListener('click', () => {
     const order = ['system', 'light', 'dark'];
     els['theme-select'].value = order[(order.indexOf(state.settings.theme) + 1) % order.length];
@@ -1574,7 +1623,7 @@ async function initialize() {
 
 function createPreviewBridge() {
   const listeners = new Set();
-  let previewSettings = { theme: 'system', autoQuarantine: false, launchAtStartup: true };
+  let previewSettings = { theme: 'system', autoQuarantine: false, launchAtStartup: true, scheduledScanEnabled: false, scheduledScanMode: 'quick', scheduledScanHour: 3, skipScheduledScanOnBattery: true };
   let previewProtection = { active: true, paused: false, targetLabel: 'Descargas', autoQuarantine: false, sessionOnly: true };
   let scanSequence = 0;
   let monitorActive = false;
@@ -1660,14 +1709,15 @@ function createPreviewBridge() {
   return Object.freeze({
     async getBootstrap() {
       return {
-        app: { version: '0.2.3-preview' },
-        engine: { version: '0.2.3' },
+        app: { version: '0.3.0-preview' },
+        engine: { version: '0.3.0' },
         definitions: { version: '2026.08.18-local' },
         settings: previewSettings,
         protection: previewProtection,
         startup: { supported: true, enabled: previewSettings.launchAtStartup, requested: previewSettings.launchAtStartup, launchesInBackground: true },
         stats: { totalScanned: 148 },
         reportAvailable: true,
+        health: {status:'healthy',authenticatedWorkerIpc:true,protectionAvailable:true,statePersistenceAvailable:true,recoveredInterruptedOperation:false},
         network: { completedAt:'2026-08-20T09:30:00.000Z',reportAvailable:true,summary:{connections:2,suspicious:0,unsignedProcesses:1,truncated:false},windowsSecurity:{firewall:[{name:'Domain',enabled:true},{name:'Private',enabled:true},{name:'Public',enabled:true}],defender:{antivirusEnabled:true,realTimeProtectionEnabled:true,networkInspectionEnabled:true}},events:[{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'162.159.135.234',remotePort:443,domain:'discord.com',process:{id:4120,name:'Discord',path:'C:\\Usuarios\\Demo\\AppData\\Local\\Discord\\Discord.exe'},signature:{status:'valid',publisher:'Discord Inc.'}},{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'20.190.160.1',remotePort:443,domain:'login.microsoftonline.com',process:{id:1052,name:'msedge',path:'C:\\Program Files\\Microsoft\\Edge\\msedge.exe'},signature:{status:'valid',publisher:'Microsoft Corporation'}}]},
         lastScan: {
           completedAt: '2026-08-18T08:35:00.000Z',
@@ -1713,6 +1763,10 @@ function createPreviewBridge() {
       quarantine = quarantine.filter(item => item.id !== id);
       emit({ type: 'quarantine-updated' });
       return { label: 'Documentos · Archivo restaurado' };
+    },
+    async showQuarantinePath({ id } = {}) {
+      if (!safeString(id)) throw new Error('Identificador no válido.');
+      return { shown: true };
     },
     async exportReport({ format } = {}) {
       if (!['json', 'csv'].includes(format)) throw new Error('Formato no válido.');
@@ -1766,7 +1820,11 @@ function createPreviewBridge() {
       previewSettings = {
         theme: ['system', 'light', 'dark'].includes(settings?.theme) ? settings.theme : 'system',
         autoQuarantine: settings?.autoQuarantine === true,
-        launchAtStartup: settings?.launchAtStartup !== false
+        launchAtStartup: settings?.launchAtStartup !== false,
+        scheduledScanEnabled: settings?.scheduledScanEnabled === true,
+        scheduledScanMode: settings?.scheduledScanMode === 'full' ? 'full' : 'quick',
+        scheduledScanHour: Number.isSafeInteger(settings?.scheduledScanHour) ? settings.scheduledScanHour : 3,
+        skipScheduledScanOnBattery: settings?.skipScheduledScanOnBattery !== false
       };
       return { settings: { ...previewSettings } };
     },

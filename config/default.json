@@ -6,7 +6,10 @@
   "trustedApplicationPolicies": [
     { "publisher": "Discord Inc.", "roots": ["%LOCALAPPDATA%\\Discord"] },
     { "publisher": "ESL Gaming GmbH", "roots": ["%LOCALAPPDATA%\\FACEIT"] },
-    { "publisher": "ESL FACEIT Group Ltd.", "roots": ["%PROGRAMFILES%\\FACEIT AC", "%PROGRAMFILES(X86)%\\FACEIT AC"] }
+    { "publisher": "ESL FACEIT Group Ltd.", "roots": ["%PROGRAMFILES%\\FACEIT AC", "%PROGRAMFILES(X86)%\\FACEIT AC"] },
+    { "publisher": "Valve Corp.", "roots": ["%PROGRAMFILES(X86)%\\Steam"] },
+    { "publisher": "Riot Games, Inc.", "roots": ["%PROGRAMFILES%\\Riot Vanguard"] },
+    { "publisher": "Epic Games Inc.", "roots": ["%PROGRAMFILES(X86)%\\Epic Games"] }
   ],
   "exclude": ["node_modules", ".git", ".aegis-quarantine", "$Recycle.Bin", "System Volume Information"],
   "quarantineDirectory": ".aegis-quarantine"

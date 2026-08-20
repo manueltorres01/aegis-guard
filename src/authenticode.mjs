@@ -10,7 +10,10 @@ const SCRIPT = [
   "$subject = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '' }",
   "$organization = if ($subject -match '(?:^|,\\s*)O=([^,]+)') { $Matches[1].Trim() } else { '' }",
   "$status = if ($signature) { $signature.Status.ToString() } else { 'Error' }",
-  "[pscustomobject]@{ Status = $status; Subject = $subject; Organization = $organization; IsOSBinary = ($signature.IsOSBinary -eq $true); Error = $signatureError } | ConvertTo-Json -Compress"
+  "$version = try { [Diagnostics.FileVersionInfo]::GetVersionInfo($targetPath) } catch { $null }",
+  "$zone = ''",
+  "try { $zoneText = [IO.File]::ReadAllText($targetPath + ':Zone.Identifier'); if ($zoneText -match '(?m)^ZoneId=(\\d+)') { $zone = $Matches[1] } } catch {}",
+  "[pscustomobject]@{ Status = $status; Subject = $subject; Organization = $organization; IsOSBinary = ($signature.IsOSBinary -eq $true); CompanyName = [string]$version.CompanyName; ProductName = [string]$version.ProductName; FileVersion = [string]$version.FileVersion; ZoneId = $zone; Error = $signatureError } | ConvertTo-Json -Compress"
 ].join('; ');
 
 export function createAuthenticodeVerifier({ cacheSize = 10_000, timeoutMs = 8_000 } = {}) {
@@ -47,7 +50,11 @@ function verify(file, timeoutMs) {
           status: String(parsed.Status ?? '').toLowerCase() === 'valid' ? 'valid' : 'invalid',
           subject: String(parsed.Subject ?? ''),
           organization: String(parsed.Organization ?? ''),
-          isOsBinary: parsed.IsOSBinary === true
+          isOsBinary: parsed.IsOSBinary === true,
+          companyName: String(parsed.CompanyName ?? ''),
+          productName: String(parsed.ProductName ?? ''),
+          fileVersion: String(parsed.FileVersion ?? ''),
+          zoneId: /^\d+$/.test(String(parsed.ZoneId ?? '')) ? Number(parsed.ZoneId) : null
         });
       } catch (parseError) { reject(parseError); }
     });

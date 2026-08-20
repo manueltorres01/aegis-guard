@@ -99,12 +99,16 @@ test('records valid trusted signatures and neutralizes only low-confidence binar
   const engine = new ScanEngine({
     definitions, threshold: 60, maxFileSizeMb: 1,
     trustedPublisherOrganizations: ['Microsoft Corporation'],
-    trustVerifier: async () => ({ status: 'valid', subject: 'CN=Microsoft Windows, O=Microsoft Corporation', organization: 'Microsoft Corporation' })
+    trustVerifier: async () => ({ status: 'valid', subject: 'CN=Microsoft Windows, O=Microsoft Corporation', organization: 'Microsoft Corporation', companyName:'Microsoft Corporation',productName:'Windows Component',fileVersion:'10.0.1',zoneId:3 })
   });
   const result = await engine.scanFile(sample);
   assert.equal(result.verdict, 'clean');
   assert.equal(result.score, 0);
   assert.equal(result.trust.organization, 'Microsoft Corporation');
+  assert.equal(result.trust.companyName, 'Microsoft Corporation');
+  assert.equal(result.trust.productName, 'Windows Component');
+  assert.equal(result.trust.fileVersion, '10.0.1');
+  assert.equal(result.trust.zoneId, 3);
   assert.ok(result.findings.some(x => x.id === 'trust.authenticode'));
 });
 

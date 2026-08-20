@@ -32,9 +32,15 @@ An eligible stable regular file is hashed and pattern-matched exhaustively in
 streaming chunks. The 128 MiB Quick-scan cutoff does not apply to Downloads or
 manual-folder protection; large files can therefore take longer to inspect.
 
-This protection runs in the Aegis process. It is not a Windows service, file-
-system driver or system-wide interception layer, and it stops when Aegis
-closes. Keep Microsoft Defender enabled.
+This protection runs in the Aegis user-session background process. Closing the window hides it in the Windows tray, so monitoring and enabled schedules continue; choosing **Salir y detener protección** from the tray ends it. It is not yet a Windows SCM service, file-system driver or system-wide interception layer. Signing out, shutting down Windows or explicitly exiting Aegis stops protection. Keep Microsoft Defender enabled.
+
+## Scheduled scans and recovery (0.3.0)
+
+Daily Quick or Full scans can be enabled in Settings and are disabled by default. Aegis can skip a scheduled run on battery; scans use bounded streaming concurrency and never start while another scan is active. Scheduling depends on Aegis running in the user session.
+
+Before a scan starts, Aegis records a bounded operation journal. If the process or Windows stops unexpectedly, the next start clears the incomplete operation safely, records a recovery event and exposes degraded health for review. The broker/worker protocol uses a per-session 256-bit HMAC key and rejects altered or unauthenticated messages.
+
+Quarantine offers **Ruta** to show the authenticated original location and **Restaurar** to return the file to that exact location. Restore never opens a destination selector and refuses to overwrite an existing file.
 
 ## Pause is session-only
 

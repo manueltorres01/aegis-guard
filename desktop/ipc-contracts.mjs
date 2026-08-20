@@ -8,6 +8,7 @@ export const IPC_CHANNELS = Object.freeze({
   listQuarantine: 'aegis:quarantine:list',
   quarantineIsolate: 'aegis:quarantine:isolate',
   restoreQuarantine: 'aegis:quarantine:restore',
+  showQuarantinePath: 'aegis:quarantine:path',
   exportReport: 'aegis:report:export',
   runNetworkAudit: 'aegis:network:audit',
   exportNetworkReport: 'aegis:network:export',
@@ -23,7 +24,7 @@ export const IPC_CHANNELS = Object.freeze({
 
 export const EVENT_CHANNEL = 'aegis:event';
 
-export const WORKER_PROTOCOL_VERSION = 1;
+export const WORKER_PROTOCOL_VERSION = 2;
 
 export const WORKER_ACTIONS = Object.freeze({
   initialize: 'service.initialize',
@@ -104,6 +105,8 @@ export function parseRestore(value) {
   return { id: parseOpaqueId(input.id, 'quarantine identifier') };
 }
 
+export const parseQuarantinePath = parseRestore;
+
 export function parseExportReport(value) {
   const input = assertPlainObject(value, 'report export request');
   assertOnlyKeys(input, ['format']);
@@ -122,13 +125,13 @@ export function parseIsolateResult(value) {
 
 export function parseSettings(value) {
   const input = assertPlainObject(value, 'settings');
-  assertOnlyKeys(input, ['theme', 'autoQuarantine', 'notifications', 'checkUpdates', 'updateChannel', 'launchAtStartup']);
+  assertOnlyKeys(input, ['theme', 'autoQuarantine', 'notifications', 'checkUpdates', 'updateChannel', 'launchAtStartup', 'scheduledScanEnabled', 'scheduledScanMode', 'scheduledScanHour', 'skipScheduledScanOnBattery']);
   const output = {};
   if (Object.hasOwn(input, 'theme')) {
     if (!THEMES.has(input.theme)) throw new ContractError('Unknown theme');
     output.theme = input.theme;
   }
-  for (const key of ['autoQuarantine', 'notifications', 'checkUpdates', 'launchAtStartup']) {
+  for (const key of ['autoQuarantine', 'notifications', 'checkUpdates', 'launchAtStartup', 'scheduledScanEnabled', 'skipScheduledScanOnBattery']) {
     if (Object.hasOwn(input, key)) {
       if (typeof input[key] !== 'boolean') throw new ContractError(`${key} must be a boolean`);
       output[key] = input[key];
@@ -137,6 +140,14 @@ export function parseSettings(value) {
   if (Object.hasOwn(input, 'updateChannel')) {
     if (!UPDATE_CHANNELS.has(input.updateChannel)) throw new ContractError('Unknown update channel');
     output.updateChannel = input.updateChannel;
+  }
+  if (Object.hasOwn(input, 'scheduledScanMode')) {
+    if (!['quick', 'full'].includes(input.scheduledScanMode)) throw new ContractError('Unknown scheduled scan mode');
+    output.scheduledScanMode = input.scheduledScanMode;
+  }
+  if (Object.hasOwn(input, 'scheduledScanHour')) {
+    if (!Number.isSafeInteger(input.scheduledScanHour) || input.scheduledScanHour < 0 || input.scheduledScanHour > 23) throw new ContractError('Invalid scheduled scan hour');
+    output.scheduledScanHour = input.scheduledScanHour;
   }
   return output;
 }

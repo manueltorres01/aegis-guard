@@ -17,7 +17,11 @@ const DEFAULT_SETTINGS = Object.freeze({
   notifications: true,
   checkUpdates: true,
   updateChannel: 'stable',
-  launchAtStartup: true
+  launchAtStartup: true,
+  scheduledScanEnabled: false,
+  scheduledScanMode: 'quick',
+  scheduledScanHour: 3,
+  skipScheduledScanOnBattery: true
 });
 
 const MAX_RETAINED_RESULTS = 5_000;
@@ -63,6 +67,12 @@ export class AppService {
     this.networkAuditor = new NetworkAuditor({ indicators: this.networkIndicators });
     this.settings = sanitizeSettings(await readJsonOr(this.settingsFile, DEFAULT_SETTINGS));
     this.state = sanitizeState(await readJsonOr(this.stateFile, {}));
+    this.recoveredOperation = this.state.activeOperation;
+    if (this.recoveredOperation) {
+      this.addActivity({ type: 'recovery', at: new Date().toISOString(), operation: this.recoveredOperation });
+      this.state.activeOperation = null;
+      await this.persistStateBestEffort('startup-recovery');
+    }
     const quarantineDirectory = path.join(this.dataDirectory, 'quarantine');
     this.quarantine = new Quarantine(quarantineDirectory, { key: this.quarantineKey });
     await this.quarantine.init();
@@ -73,7 +83,7 @@ export class AppService {
       ...this.config,
       definitions: this.definitions,
       trustVerifier: createAuthenticodeVerifier(),
-      excludePaths: [canonicalQuarantineDirectory, quarantineDirectory, this.reportsDirectory],
+      excludePaths: [canonicalQuarantineDirectory, quarantineDirectory, this.reportsDirectory, this.stateFile, this.settingsFile, path.join(this.dataDirectory, 'schedule-state.json')],
       isTransientPath: candidate => this.quarantine.isTransientPath(candidate)
     });
     this.watchService = new WatchService({
@@ -109,6 +119,13 @@ export class AppService {
       activity: this.state.activity.slice(0, 30),
       reportAvailable: Boolean(await Promise.all([this.getLatestReport('json'), this.getLatestReport('csv')]).catch(() => null)),
       network: this.state.latestNetworkReport?.summary ? { ...this.state.latestNetworkReport, reportAvailable: true } : null,
+      health: {
+        status: this.protectionError || this.lastPersistenceError || this.recoveredOperation ? 'degraded' : 'healthy',
+        authenticatedWorkerIpc: true,
+        protectionAvailable: !this.protectionError,
+        statePersistenceAvailable: !this.lastPersistenceError,
+        recoveredInterruptedOperation: Boolean(this.recoveredOperation)
+      },
       quarantine: quarantineInventory.items,
       quarantineCount: quarantineInventory.total,
       quarantineInventory: {
@@ -222,6 +239,8 @@ export class AppService {
     this.jobs.set(scanId, job);
     trimMap(this.jobs, MAX_STORED_JOBS);
     this.activeScan = { scanId, controller, path: target, mode };
+    this.state.activeOperation = { kind: 'scan', scanId, mode, startedAt: new Date(startedAt).toISOString() };
+    await this.persistStateBestEffort('scan-start');
     this.emitEvent('scan-started', {
       scanId,
       mode,
@@ -425,6 +444,8 @@ export class AppService {
       throw error;
     } finally {
       this.activeScan = null;
+      this.state.activeOperation = null;
+      await this.persistStateBestEffort('scan-finished');
     }
   }
 
@@ -672,8 +693,10 @@ export class AppService {
   async persistStateBestEffort(context) {
     try {
       await this.persistState();
+      this.lastPersistenceError = null;
       return true;
     } catch {
+      this.lastPersistenceError = context || 'unknown';
       this.emitEvent('scan-warning', {
         code: 'STATE_NOT_PERSISTED',
         context,
@@ -692,7 +715,11 @@ function sanitizeSettings(input = {}) {
     notifications: typeof input.notifications === 'boolean' ? input.notifications : DEFAULT_SETTINGS.notifications,
     checkUpdates: typeof input.checkUpdates === 'boolean' ? input.checkUpdates : DEFAULT_SETTINGS.checkUpdates,
     updateChannel: ['stable', 'beta'].includes(input.updateChannel) ? input.updateChannel : DEFAULT_SETTINGS.updateChannel,
-    launchAtStartup: typeof input.launchAtStartup === 'boolean' ? input.launchAtStartup : DEFAULT_SETTINGS.launchAtStartup
+    launchAtStartup: typeof input.launchAtStartup === 'boolean' ? input.launchAtStartup : DEFAULT_SETTINGS.launchAtStartup,
+    scheduledScanEnabled: typeof input.scheduledScanEnabled === 'boolean' ? input.scheduledScanEnabled : DEFAULT_SETTINGS.scheduledScanEnabled,
+    scheduledScanMode: ['quick', 'full'].includes(input.scheduledScanMode) ? input.scheduledScanMode : DEFAULT_SETTINGS.scheduledScanMode,
+    scheduledScanHour: Number.isSafeInteger(input.scheduledScanHour) && input.scheduledScanHour >= 0 && input.scheduledScanHour <= 23 ? input.scheduledScanHour : DEFAULT_SETTINGS.scheduledScanHour,
+    skipScheduledScanOnBattery: typeof input.skipScheduledScanOnBattery === 'boolean' ? input.skipScheduledScanOnBattery : DEFAULT_SETTINGS.skipScheduledScanOnBattery
   };
 }
 
@@ -702,7 +729,17 @@ function sanitizeState(input = {}) {
     lastSummary: input.lastSummary && typeof input.lastSummary === 'object' ? input.lastSummary : null,
     activity: Array.isArray(input.activity) ? input.activity.slice(0, 100) : [],
     latestReport: sanitizeLatestReport(input.latestReport),
-    latestNetworkReport: sanitizeNetworkReport(input.latestNetworkReport)
+    latestNetworkReport: sanitizeNetworkReport(input.latestNetworkReport),
+    activeOperation: sanitizeActiveOperation(input.activeOperation)
+  };
+}
+
+function sanitizeActiveOperation(value) {
+  if (!value || typeof value !== 'object' || value.kind !== 'scan') return null;
+  return {
+    kind: 'scan', scanId: typeof value.scanId === 'string' ? value.scanId : '',
+    mode: ['quick', 'deep', 'full', 'simulation'].includes(value.mode) ? value.mode : 'deep',
+    startedAt: typeof value.startedAt === 'string' ? value.startedAt : null
   };
 }
 

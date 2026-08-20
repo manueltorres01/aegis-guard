@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url';
 import {
   app,
   BrowserWindow,
+  Menu,
+  Tray,
   dialog,
   ipcMain,
+  powerMonitor,
   protocol,
   safeStorage,
   screen,
@@ -25,12 +28,14 @@ import {
   parseIsolateResult,
   parseMonitorStart,
   parseRestore,
+  parseQuarantinePath,
   parseSettings,
   parseStartScan,
   serializeError
 } from './ipc-contracts.mjs';
 import { UpdateService } from './update-service.mjs';
 import { TargetVault } from './target-vault.mjs';
+import { signWorkerMessage, verifyWorkerMessage } from './ipc-auth.mjs';
 
 const APPLICATION_ORIGIN = 'aegis://app';
 const APPLICATION_ENTRY = `${APPLICATION_ORIGIN}/index.html`;
@@ -77,6 +82,10 @@ let activeMutationCount = 0;
 let backgroundLaunch = false;
 let startupRequested = true;
 let startupError = null;
+let tray = null;
+let scheduledSettings = null;
+let scheduledTimer = null;
+let lastScheduledDay = null;
 const targetVault = new TargetVault();
 
 if (!hasInstanceLock) {
@@ -98,7 +107,7 @@ if (!hasInstanceLock) {
     void gracefulShutdown().finally(() => app.quit());
   });
 
-  app.on('window-all-closed', () => app.quit());
+  app.on('window-all-closed', () => {});
 
   app.on('activate', () => {
     if (!mainWindow && engine) void createMainWindow();
@@ -117,6 +126,7 @@ if (!hasInstanceLock) {
 }
 
 async function gracefulShutdown() {
+  if (scheduledTimer) { clearInterval(scheduledTimer); scheduledTimer = null; }
   if (!engine) return;
   try { await engine.shutdown(); }
   catch { /* a forced stop below is the fail-safe */ }
@@ -141,6 +151,8 @@ async function startApplication() {
     downloadsDirectory: app.getPath('downloads'),
     quarantineKeyBase64: quarantineKey.value
   });
+  scheduledSettings = sanitizeSettings(initialBootstrap?.settings);
+  lastScheduledDay = await loadScheduledDay();
   applyLaunchAtStartup(initialBootstrap?.settings?.launchAtStartup !== false);
 
   updateService = new UpdateService({
@@ -151,6 +163,8 @@ async function startApplication() {
   await updateService.initialize();
 
   registerIpcHandlers();
+  createTray();
+  startScheduleLoop();
   await createMainWindow(applicationSession);
   if (quarantineKey.developmentFallback) {
     void dialog.showMessageBox(mainWindow, {
@@ -160,6 +174,59 @@ async function startApplication() {
       detail: 'La clave local de cuarentena se ha guardado con permisos restringidos. Las compilaciones distribuidas no permiten este fallback.'
     });
   }
+}
+
+function startScheduleLoop() {
+  if (scheduledTimer) clearInterval(scheduledTimer);
+  scheduledTimer = setInterval(() => void checkScheduledScan(), 60_000);
+  scheduledTimer.unref?.();
+  void checkScheduledScan();
+}
+
+async function checkScheduledScan(now = new Date()) {
+  const settings = scheduledSettings;
+  if (!settings?.scheduledScanEnabled || activeScanContext || now.getHours() !== settings.scheduledScanHour) return false;
+  const day = now.toISOString().slice(0, 10);
+  if (lastScheduledDay === day) return false;
+  if (settings.skipScheduledScanOnBattery && powerMonitor.isOnBatteryPower()) return false;
+  const mode = settings.scheduledScanMode === 'full' ? 'full' : 'quick';
+  const context = mode === 'full' ? fullTargetContext() : quickTargetContext();
+  activeScanContext = context;
+  lastScheduledDay = day;
+  await saveScheduledDay(day).catch(() => {});
+  try {
+    await engine.request(WORKER_ACTIONS.startScan, { mode, target: mode === 'quick' ? 'quick' : undefined, autoQuarantine: settings.autoQuarantine }, { timeoutMs: 0 });
+    return true;
+  } catch (error) {
+    publishEvent({ type:'scan-warning', payload:{ code:'SCHEDULED_SCAN_FAILED', message:error?.message ?? 'El análisis programado no pudo completarse.' } });
+    return false;
+  } finally { activeScanContext = null; }
+}
+
+async function loadScheduledDay() {
+  try {
+    const value = JSON.parse(await fs.readFile(path.join(app.getPath('userData'), 'schedule-state.json'), 'utf8'));
+    return typeof value?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.day) ? value.day : null;
+  } catch { return null; }
+}
+
+async function saveScheduledDay(day) {
+  const file = path.join(app.getPath('userData'), 'schedule-state.json');
+  const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify({ day }), { flag:'wx', mode:0o600 });
+  await fs.rename(temporary, file);
+}
+
+function createTray() {
+  if (tray || process.platform !== 'win32') return;
+  tray = new Tray(path.join(app.getAppPath(), 'build', 'icon.svg'));
+  tray.setToolTip('Aegis Guard · protección activa');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Abrir Aegis Guard', click: () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } } },
+    { type: 'separator' },
+    { label: 'Salir y detener protección', click: () => { isQuitting = true; app.quit(); } }
+  ]));
+  tray.on('double-click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } });
 }
 
 function applyLaunchAtStartup(requested) {
@@ -299,6 +366,11 @@ async function createMainWindow(applicationSession = session.fromPartition(APPLI
 
   window.once('ready-to-show', () => {
     if (!window.isDestroyed() && !backgroundLaunch) window.show();
+  });
+  window.on('close', event => {
+    if (isQuitting || shutdownStarted) return;
+    event.preventDefault();
+    window.hide();
   });
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
@@ -502,6 +574,7 @@ function registerIpcHandlers() {
   });
 
   registerHandler(IPC_CHANNELS.restoreQuarantine, parseRestore, request => restoreQuarantine(request.id));
+  registerHandler(IPC_CHANNELS.showQuarantinePath, parseQuarantinePath, request => showQuarantinePath(request.id));
   registerHandler(IPC_CHANNELS.exportReport, parseExportReport, request => exportLatestReport(request.format));
   registerHandler(IPC_CHANNELS.runNetworkAudit, assertNoPayload, async () => sanitizeNetworkReport(
     await engine.request(WORKER_ACTIONS.runNetworkAudit, undefined, { timeoutMs: 60_000 })
@@ -545,6 +618,7 @@ function registerIpcHandlers() {
     const saved = await engine.request(WORKER_ACTIONS.saveSettings, settings);
     const startup = applyLaunchAtStartup(saved.launchAtStartup !== false);
     const publicSettings = sanitizeSettings(saved);
+    scheduledSettings = publicSettings;
     return { ...publicSettings, settings: publicSettings, startup };
   });
 
@@ -640,6 +714,21 @@ async function restoreQuarantine(id) {
   finally { activeMutationCount--; }
   const label = safeLabel(path.basename(String(result ?? destination)));
   return { cancelled: false, restored: true, id, name: label, label };
+}
+
+async function showQuarantinePath(id) {
+  const inventory = await engine.request(WORKER_ACTIONS.listQuarantine);
+  const items = Array.isArray(inventory) ? inventory : Array.isArray(inventory?.items) ? inventory.items : [];
+  const metadata = items.find(item => item?.id === id);
+  if (!metadata || typeof metadata.originalPath !== 'string' || !path.isAbsolute(metadata.originalPath)) {
+    throw operationError('QUARANTINE_NOT_FOUND', 'No se conserva una ruta original válida para este elemento.');
+  }
+  const originalPath = path.resolve(metadata.originalPath);
+  await dialog.showMessageBox(mainWindow, {
+    type: 'info', title: 'Ruta original', message: path.basename(originalPath), detail: originalPath,
+    buttons: ['Cerrar'], defaultId: 0, cancelId: 0, noLink: true
+  });
+  return { shown: true };
 }
 
 async function exportLatestReport(format) {
@@ -863,6 +952,7 @@ function sanitizeBootstrap(value) {
     totalScanned: lastSummary?.scanned ?? 0,
     reportAvailable: Boolean(input.reportAvailable),
     network: input.network ? sanitizeNetworkReport(input.network) : null,
+    health: sanitizeHealth(input.health),
     activity: Array.isArray(input.activity) ? input.activity.slice(0, 100).map(sanitizeActivity) : [],
     quarantine,
     quarantineCount: quarantineInventory.total,
@@ -880,6 +970,17 @@ function sanitizeBootstrap(value) {
       supported: updateService?.status !== 'unavailable',
       channel: 'stable'
     }
+  };
+}
+
+function sanitizeHealth(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    status: input.status === 'healthy' ? 'healthy' : 'degraded',
+    authenticatedWorkerIpc: Boolean(input.authenticatedWorkerIpc),
+    protectionAvailable: Boolean(input.protectionAvailable),
+    statePersistenceAvailable: Boolean(input.statePersistenceAvailable),
+    recoveredInterruptedOperation: Boolean(input.recoveredInterruptedOperation)
   };
 }
 
@@ -940,7 +1041,12 @@ function sanitizeScanResult(value, context) {
       organization: safeText(input.trust.organization, 200),
       isOsBinary: Boolean(input.trust.isOsBinary),
       trustedPublisher: Boolean(input.trust.trustedPublisher),
-      applicationVerified: Boolean(input.trust.applicationVerified)
+      applicationVerified: Boolean(input.trust.applicationVerified),
+      companyName: safeText(input.trust.companyName, 200),
+      productName: safeText(input.trust.productName, 200),
+      fileVersion: safeText(input.trust.fileVersion, 100),
+      zoneId: Number.isSafeInteger(input.trust.zoneId) ? input.trust.zoneId : null,
+      origin: ['windows', 'program-files', 'program-files-x86', 'installed-user-application', 'other'].includes(input.trust.origin) ? input.trust.origin : 'other'
     } : undefined
   };
 }
@@ -1009,7 +1115,11 @@ function sanitizeSettings(value) {
     notifications: input.notifications !== false,
     checkUpdates: input.checkUpdates !== false,
     updateChannel: ['stable', 'beta'].includes(input.updateChannel) ? input.updateChannel : 'stable',
-    launchAtStartup: input.launchAtStartup !== false
+    launchAtStartup: input.launchAtStartup !== false,
+    scheduledScanEnabled: Boolean(input.scheduledScanEnabled),
+    scheduledScanMode: input.scheduledScanMode === 'full' ? 'full' : 'quick',
+    scheduledScanHour: Number.isSafeInteger(input.scheduledScanHour) && input.scheduledScanHour >= 0 && input.scheduledScanHour <= 23 ? input.scheduledScanHour : 3,
+    skipScheduledScanOnBattery: input.skipScheduledScanOnBattery !== false
   };
 }
 
@@ -1199,6 +1309,7 @@ class EngineBridge {
     this.readyResolve = null;
     this.readyReject = null;
     this.disposed = false;
+    this.authKey = crypto.randomBytes(32).toString('base64');
   }
 
   async start(options) {
@@ -1212,7 +1323,10 @@ class EngineBridge {
     }, 15_000);
     this.ready.finally(() => clearTimeout(readinessTimeout)).catch(() => {});
 
-    this.child = utilityProcess.fork(WORKER_FILE, [], { serviceName: 'Aegis Guard Scan Engine' });
+    this.child = utilityProcess.fork(WORKER_FILE, [], {
+      serviceName: 'Aegis Guard Scan Engine',
+      env: { ...process.env, AEGIS_WORKER_AUTH_KEY: this.authKey }
+    });
     this.child.on('message', message => this.handleMessage(message?.data ?? message));
     this.child.on('exit', code => this.handleExit(code));
     this.child.on('error', error => this.handleFailure(error));
@@ -1237,7 +1351,7 @@ class EngineBridge {
       }
       this.pending.set(id, { resolve, reject, timeout });
       try {
-        this.child.postMessage({ kind: 'request', id, action, payload });
+        this.child.postMessage(signWorkerMessage({ kind: 'request', id, action, payload }, this.authKey));
       } catch (error) {
         if (timeout) clearTimeout(timeout);
         this.pending.delete(id);
@@ -1247,7 +1361,11 @@ class EngineBridge {
   }
 
   handleMessage(message) {
-    if (!message || typeof message !== 'object') return;
+    message = verifyWorkerMessage(message, this.authKey);
+    if (!message) {
+      this.handleFailure(operationError('WORKER_AUTH_FAILED', 'The scan worker sent an unauthenticated message'));
+      return;
+    }
     if (message.kind === 'ready') {
       if (message.protocolVersion !== WORKER_PROTOCOL_VERSION) {
         this.readyReject?.(operationError('WORKER_PROTOCOL', 'Incompatible scan worker protocol'));
