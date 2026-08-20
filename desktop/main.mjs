@@ -218,8 +218,9 @@ async function saveScheduledDay(day) {
 }
 
 function createTray() {
-  if (tray || process.platform !== 'win32') return;
-  tray = new Tray(path.join(app.getAppPath(), 'build', 'icon.svg'));
+  if (tray || process.platform !== 'win32') return Boolean(tray);
+  try { tray = new Tray(path.join(app.getAppPath(), 'build', 'icon.png')); }
+  catch { tray = null; return false; }
   tray.setToolTip('Aegis Guard · protección activa');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Abrir Aegis Guard', click: () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } } },
@@ -227,6 +228,7 @@ function createTray() {
     { label: 'Salir y detener protección', click: () => { isQuitting = true; app.quit(); } }
   ]));
   tray.on('double-click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } });
+  return true;
 }
 
 function applyLaunchAtStartup(requested) {
@@ -369,6 +371,7 @@ async function createMainWindow(applicationSession = session.fromPartition(APPLI
   });
   window.on('close', event => {
     if (isQuitting || shutdownStarted) return;
+    if (!tray) { isQuitting = true; return; }
     event.preventDefault();
     window.hide();
   });

@@ -16,7 +16,7 @@ files:
   - src/**/*
   - config/**/*
   - definitions/**/*
-  - build/icon.svg
+  - build/icon.png
   - package.json
 
 win:

@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node src/cli.mjs",
     "desktop": "electron .",
+    "build:icon": "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/render-icon.ps1",
     "ui:preview": "node desktop/preview-server.mjs",
     "dist:win": "electron-builder --config electron-builder.yml --win nsis --x64 --publish never",
     "dist:win:unsigned": "electron-builder --config electron-builder.yml --win nsis --x64 --publish never -c.forceCodeSigning=false",

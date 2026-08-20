@@ -115,3 +115,12 @@ test('0.4.0 presents PUA separately from confirmed malware', async () => {
   assert.match(app, /classification === 'pua'/);
   assert.match(app, /Aplicación no deseada/);
 });
+
+test('packaged tray uses a supported PNG and fails open to the main window', async () => {
+  const main = await fs.readFile(new URL('../desktop/main.mjs', import.meta.url), 'utf8');
+  const builder = await fs.readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8');
+  assert.match(main, /build', 'icon\.png'/);
+  assert.match(main, /catch \{ tray = null; return false; \}/);
+  assert.match(main, /if \(!tray\) \{ isQuitting = true; return; \}/);
+  assert.match(builder, /build\/icon\.png/);
+});
