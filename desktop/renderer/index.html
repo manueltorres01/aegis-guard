@@ -239,6 +239,21 @@
             </div>
           </article>
 
+          <article class="card manual-monitor-card" aria-labelledby="ransomware-audit-title">
+            <div class="manual-monitor-intro">
+              <span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-shield"/></svg></span>
+              <div>
+                <p class="overline" id="ransomware-audit-overline">Modo auditoría</p>
+                <h3 id="ransomware-audit-title">Protección frente a ransomware</h3>
+                <p id="ransomware-audit-description">Desactivada. Puedes habilitarla en Ajustes para observar cambios anómalos sin bloquear procesos.</p>
+              </div>
+            </div>
+            <div class="manual-monitor-controls">
+              <div class="target-display"><svg aria-hidden="true"><use href="#i-results"/></svg><span id="ransomware-audit-roots">0 carpetas observadas</span><span class="target-scope">Sin bloqueo</span></div>
+              <p class="muted-copy" id="ransomware-audit-alert">No hay alertas de auditoría recientes.</p>
+            </div>
+          </article>
+
           <article class="card manual-monitor-card" aria-labelledby="manual-monitor-title">
             <div class="manual-monitor-intro">
               <span class="choice-icon violet"><svg aria-hidden="true"><use href="#i-folder"/></svg></span>
@@ -368,6 +383,15 @@
               </article>
 
               <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Auditoría de ransomware</h3><p>Observa cambios rápidos, borrados, extensiones añadidas y documentos señuelo.</p></div></div>
+                <label class="toggle-row" for="ransomware-audit-enabled">
+                  <span><strong>Activar modo auditoría</strong><small>No bloquea procesos ni atribuye autores en esta versión. Crea un canario identificable en cada carpeta observada.</small></span>
+                  <input id="ransomware-audit-enabled" type="checkbox" role="switch">
+                  <span class="toggle" aria-hidden="true"></span>
+                </label>
+              </article>
+
+              <article class="card settings-card">
                 <div class="settings-card-title"><span class="choice-icon green"><svg aria-hidden="true"><use href="#i-play"/></svg></span><div><h3>Inicio de Windows</h3><p>Controla si Aegis se abre al iniciar tu sesión de Windows.</p></div></div>
                 <label class="toggle-row" for="start-with-windows">
                   <span><strong>Iniciar con Windows</strong><small id="startup-setting-note">Permite que Aegis active la protección de Descargas al comenzar cada sesión. Activado por defecto.</small></span>
@@ -407,6 +431,7 @@
                   <div><dt>IPC del motor</dt><dd id="health-ipc">—</dd></div>
                   <div><dt>Vigilancia</dt><dd id="health-protection">—</dd></div>
                   <div><dt>Persistencia</dt><dd id="health-persistence">—</dd></div>
+                  <div><dt>Auditoría ransomware</dt><dd id="health-ransomware">—</dd></div>
                 </dl>
               </article>
             </div>

@@ -11,6 +11,7 @@ import { ScanReportWriter } from './report-writer.mjs';
 import { NetworkAuditor, writeNetworkReport } from './network-audit.mjs';
 import { loadJson, pathExists } from './util.mjs';
 import { validateDefinitions } from './definition-security.mjs';
+import { RansomwareAudit } from './ransomware-audit.mjs';
 
 const DEFAULT_SETTINGS = Object.freeze({
   theme: 'system',
@@ -22,7 +23,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   scheduledScanEnabled: false,
   scheduledScanMode: 'quick',
   scheduledScanHour: 3,
-  skipScheduledScanOnBattery: true
+  skipScheduledScanOnBattery: true,
+  ransomwareAuditEnabled: false
 });
 
 const MAX_RETAINED_RESULTS = 5_000;
@@ -36,6 +38,7 @@ export class AppService {
     baseDirectory,
     dataDirectory,
     downloadsDirectory,
+    protectedDirectories = [],
     quarantineKeyBase64,
     driveRootsProvider = discoverWindowsDriveRoots,
     watchOptions = {},
@@ -44,6 +47,7 @@ export class AppService {
     this.baseDirectory = path.resolve(baseDirectory);
     this.dataDirectory = path.resolve(dataDirectory);
     this.downloadsDirectory = path.resolve(downloadsDirectory);
+    this.protectedDirectories = normalizeProtectedDirectories(protectedDirectories);
     this.emit = emit;
     this.driveRootsProvider = driveRootsProvider;
     this.watchOptions = watchOptions;
@@ -68,6 +72,10 @@ export class AppService {
     this.networkAuditor = new NetworkAuditor({ indicators: this.networkIndicators });
     this.settings = sanitizeSettings(await readJsonOr(this.settingsFile, DEFAULT_SETTINGS));
     this.state = sanitizeState(await readJsonOr(this.stateFile, {}));
+    this.ransomwareAudit = new RansomwareAudit({
+      roots: this.protectedDirectories,
+      emit: event => this.handleRansomwareEvent(event)
+    });
     this.recoveredOperation = this.state.activeOperation;
     if (this.recoveredOperation) {
       this.addActivity({ type: 'recovery', at: new Date().toISOString(), operation: this.recoveredOperation });
@@ -99,6 +107,7 @@ export class AppService {
       emit: event => this.handleProtectionEvent(event),
       ...this.watchOptions
     });
+    if (this.settings.ransomwareAuditEnabled) await this.ransomwareAudit.start();
     try { await this.startDownloadsProtection({ emitState: false }); }
     catch {
       this.protectionError = 'unavailable';
@@ -111,6 +120,7 @@ export class AppService {
   async getBootstrap() {
     const quarantineInventory = await this.quarantine.list();
     const monitor = this.watchService?.session;
+    const ransomwareAudit = this.getRansomwareAuditState();
     return {
       version: this.version,
       definitions: { version: this.definitions.version, generatedAt: this.definitions.generatedAt },
@@ -121,11 +131,12 @@ export class AppService {
       reportAvailable: Boolean(await Promise.all([this.getLatestReport('json'), this.getLatestReport('csv')]).catch(() => null)),
       network: this.state.latestNetworkReport?.summary ? { ...this.state.latestNetworkReport, reportAvailable: true } : null,
       health: {
-        status: this.protectionError || this.lastPersistenceError || this.recoveredOperation ? 'degraded' : 'healthy',
+        status: this.protectionError || this.lastPersistenceError || this.recoveredOperation || (this.settings.ransomwareAuditEnabled && ransomwareAudit.rootsObserved < ransomwareAudit.rootsConfigured) ? 'degraded' : 'healthy',
         authenticatedWorkerIpc: true,
         protectionAvailable: !this.protectionError,
         statePersistenceAvailable: !this.lastPersistenceError,
-        recoveredInterruptedOperation: Boolean(this.recoveredOperation)
+        recoveredInterruptedOperation: Boolean(this.recoveredOperation),
+        ransomwareAuditAvailable: !this.settings.ransomwareAuditEnabled || ransomwareAudit.rootsObserved > 0
       },
       quarantine: quarantineInventory.items,
       quarantineCount: quarantineInventory.total,
@@ -136,6 +147,7 @@ export class AppService {
         oversizedCount: quarantineInventory.oversizedCount
       },
       protection: this.getProtectionState(),
+      ransomwareAudit,
       monitor: monitor
         ? { active: true, path: monitor.root, autoQuarantine: monitor.autoQuarantine }
         : this.manualMonitorConfig
@@ -570,7 +582,8 @@ export class AppService {
     this.protectionPaused = true;
     await Promise.all([
       this.downloadsWatchService.stop({ emit: false }),
-      this.watchService.stop({ emit: false })
+      this.watchService.stop({ emit: false }),
+      this.ransomwareAudit.stop()
     ]);
     if (this.manualMonitorConfig) {
       this.emitEvent('monitor-changed', {
@@ -582,6 +595,7 @@ export class AppService {
       });
     }
     const state = this.getProtectionState();
+    this.emitEvent('ransomware-audit-state', this.getRansomwareAuditState());
     this.emitEvent('protection-state-changed', state);
     return state;
   }
@@ -603,7 +617,9 @@ export class AppService {
         this.emitEvent('monitor-error', { message: 'The selected monitor could not be resumed' });
       }
     }
+    if (this.settings.ransomwareAuditEnabled) await this.ransomwareAudit.start();
     const state = this.getProtectionState();
+    this.emitEvent('ransomware-audit-state', this.getRansomwareAuditState());
     this.emitEvent('protection-state-changed', state);
     return state;
   }
@@ -619,12 +635,18 @@ export class AppService {
 
   async saveSettings(input) {
     const previousAutoQuarantine = this.settings.autoQuarantine;
+    const previousRansomwareAudit = this.settings.ransomwareAuditEnabled;
     this.settings = sanitizeSettings({ ...this.settings, ...input });
     await writeJsonAtomic(this.settingsFile, this.settings);
     this.downloadsWatchService.setAutoQuarantine(this.settings.autoQuarantine);
     this.watchService.setAutoQuarantine(this.settings.autoQuarantine);
     if (this.manualMonitorConfig && previousAutoQuarantine !== this.settings.autoQuarantine) {
       this.manualMonitorConfig.autoQuarantine = this.settings.autoQuarantine;
+    }
+    if (previousRansomwareAudit !== this.settings.ransomwareAuditEnabled) {
+      if (this.settings.ransomwareAuditEnabled && !this.protectionPaused) await this.ransomwareAudit.start();
+      else await this.ransomwareAudit.stop({ removeCanaries: !this.settings.ransomwareAuditEnabled });
+      this.emitEvent('ransomware-audit-state', this.getRansomwareAuditState());
     }
     this.emitEvent('settings-changed', this.settings);
     if (previousAutoQuarantine !== this.settings.autoQuarantine) {
@@ -637,7 +659,8 @@ export class AppService {
     if (this.activeScan) this.activeScan.controller.abort();
     await Promise.all([
       this.watchService?.stop({ emit: false }),
-      this.downloadsWatchService?.stop({ emit: false })
+      this.downloadsWatchService?.stop({ emit: false }),
+      this.ransomwareAudit?.stop()
     ]);
   }
 
@@ -686,6 +709,23 @@ export class AppService {
     }
   }
 
+  handleRansomwareEvent(event) {
+    if (event.type !== 'ransomware-audit-alert') return;
+    const alert = event.payload;
+    this.state.ransomwareAlerts = [alert, ...this.state.ransomwareAlerts].slice(0, 100);
+    this.addActivity({
+      type: 'ransomware-audit', at: alert.at, kind: alert.kind,
+      severity: alert.severity, rootLabel: alert.rootLabel
+    });
+    this.emit(event);
+    void this.persistStateBestEffort('ransomware-audit');
+  }
+
+  getRansomwareAuditState() {
+    const status = this.ransomwareAudit.status();
+    return { ...status, configured: this.settings.ransomwareAuditEnabled, paused: this.protectionPaused, recentAlerts: this.state.ransomwareAlerts.slice(0, 20) };
+  }
+
   addActivity(entry) {
     this.state.activity = [entry, ...this.state.activity].slice(0, 100);
   }
@@ -720,7 +760,8 @@ function sanitizeSettings(input = {}) {
     scheduledScanEnabled: typeof input.scheduledScanEnabled === 'boolean' ? input.scheduledScanEnabled : DEFAULT_SETTINGS.scheduledScanEnabled,
     scheduledScanMode: ['quick', 'full'].includes(input.scheduledScanMode) ? input.scheduledScanMode : DEFAULT_SETTINGS.scheduledScanMode,
     scheduledScanHour: Number.isSafeInteger(input.scheduledScanHour) && input.scheduledScanHour >= 0 && input.scheduledScanHour <= 23 ? input.scheduledScanHour : DEFAULT_SETTINGS.scheduledScanHour,
-    skipScheduledScanOnBattery: typeof input.skipScheduledScanOnBattery === 'boolean' ? input.skipScheduledScanOnBattery : DEFAULT_SETTINGS.skipScheduledScanOnBattery
+    skipScheduledScanOnBattery: typeof input.skipScheduledScanOnBattery === 'boolean' ? input.skipScheduledScanOnBattery : DEFAULT_SETTINGS.skipScheduledScanOnBattery,
+    ransomwareAuditEnabled: typeof input.ransomwareAuditEnabled === 'boolean' ? input.ransomwareAuditEnabled : DEFAULT_SETTINGS.ransomwareAuditEnabled
   };
 }
 
@@ -731,7 +772,8 @@ function sanitizeState(input = {}) {
     activity: Array.isArray(input.activity) ? input.activity.slice(0, 100) : [],
     latestReport: sanitizeLatestReport(input.latestReport),
     latestNetworkReport: sanitizeNetworkReport(input.latestNetworkReport),
-    activeOperation: sanitizeActiveOperation(input.activeOperation)
+    activeOperation: sanitizeActiveOperation(input.activeOperation),
+    ransomwareAlerts: Array.isArray(input.ransomwareAlerts) ? input.ransomwareAlerts.slice(0, 100).map(sanitizeRansomwareAlert).filter(Boolean) : []
   };
 }
 
@@ -741,6 +783,18 @@ function sanitizeActiveOperation(value) {
     kind: 'scan', scanId: typeof value.scanId === 'string' ? value.scanId : '',
     mode: ['quick', 'deep', 'full', 'simulation'].includes(value.mode) ? value.mode : 'deep',
     startedAt: typeof value.startedAt === 'string' ? value.startedAt : null
+  };
+}
+
+function sanitizeRansomwareAlert(value) {
+  if (!value || typeof value !== 'object' || typeof value.id !== 'string') return null;
+  return {
+    id: value.id, at: typeof value.at === 'string' ? value.at : new Date(0).toISOString(),
+    kind: String(value.kind ?? '').slice(0, 80), severity: ['medium', 'high', 'critical'].includes(value.severity) ? value.severity : 'medium',
+    mode: 'audit', rootLabel: String(value.rootLabel ?? '').slice(0, 260), fileName: String(value.fileName ?? '').slice(0, 260),
+    counts: { changed: safeNonNegative(value.counts?.changed), deleted: safeNonNegative(value.counts?.deleted), extensionChanges: safeNonNegative(value.counts?.extensionChanges) },
+    process: { attributed: false, reason: 'Native process-write telemetry is not available in this build' },
+    action: 'observed-only', explanation: String(value.explanation ?? '').slice(0, 500)
   };
 }
 
@@ -895,6 +949,23 @@ function normalizeDriveRoots(value) {
     }
   }
   return roots;
+}
+
+function normalizeProtectedDirectories(value) {
+  if (!Array.isArray(value)) throw new Error('Protected directories must be an array');
+  const output = [];
+  const seen = new Set();
+  for (const item of value.slice(0, 8)) {
+    if (typeof item !== 'string' || !path.isAbsolute(item)) continue;
+    const resolved = path.resolve(item);
+    const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    if (!seen.has(key)) { seen.add(key); output.push(resolved); }
+  }
+  return output;
+}
+
+function safeNonNegative(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000) : 0;
 }
 
 function decodeKey(value) {

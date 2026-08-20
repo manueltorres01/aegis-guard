@@ -124,3 +124,17 @@ test('packaged tray uses a supported PNG and fails open to the main window', asy
   assert.match(main, /if \(!tray\) \{ isQuitting = true; return; \}/);
   assert.match(builder, /build\/icon\.png/);
 });
+
+test('0.5.0 exposes ransomware monitoring only as audit mode', async () => {
+  const [html, app, main] = await Promise.all([
+    fs.readFile(new URL('../desktop/renderer/index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../desktop/renderer/app.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../desktop/main.mjs', import.meta.url), 'utf8')
+  ]);
+  assert.match(html, /id="ransomware-audit-enabled"/);
+  assert.match(html, /No bloquea procesos ni atribuye autores/);
+  assert.match(app, /Actividad compatible con ransomware/);
+  assert.match(app, /no ha bloqueado ningún proceso/);
+  assert.match(main, /action: 'observed-only'/);
+  assert.doesNotMatch(html, /Bloquear ransomware automáticamente/);
+});

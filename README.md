@@ -12,6 +12,7 @@ Aegis Guard is an auditable malware-scanning MVP for Windows with both a command
 - Heuristics for disguised executables, suspicious scripts, macro auto-execution, ransomware commands and packed files
 - Bounded PE structural analysis, ZIP/Office metadata inspection and separate PUA classification
 - Authenticode publisher, chain/revocation evidence, timestamp identity and application provenance
+- Optional ransomware audit for rapid changes, deletions, appended extensions and identifiable canary documents
 - Concurrent directory scanning with safe exclusions and symbolic-link avoidance
 - Modern Spanish desktop dashboard with light, dark and system themes
 - Cancelable scans with discovery and scanning progress

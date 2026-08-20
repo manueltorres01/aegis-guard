@@ -25,6 +25,16 @@ Potentially unwanted applications are labeled separately and remain a suspicious
 
 Authenticode verification records the signer, signature type, certificate validity, thumbprint, chain/revocation status and timestamp certificate when Windows exposes them. Windows catalog-backed status is obtained through `Get-AuthenticodeSignature`; inability to retrieve revocation data is retained as evidence and never silently changes a malicious result to clean. NTFS internet-zone metadata is recorded when a `Zone.Identifier` stream exists. General alternate-stream enumeration is still pending because it requires a bounded native Windows broker rather than one PowerShell process per scanned file.
 
+## Ransomware audit (0.5.0)
+
+Ransomware protection is optional and disabled by default. When enabled, Aegis observes the Windows Documents, Desktop and Pictures folders while the user-session process is running. It correlates distinct changes in a ten-second window, high-rate disappearance events and rename pairs where a second extension is appended. Thresholds are deliberately conservative, alerts are rate-limited and retained in bounded state.
+
+Aegis creates one plainly named `_AegisGuard_Canary_*.txt` document in every observed root. It never overwrites a pre-existing file: a name collision with different content disables that canary. Modification or removal creates an audit alert. Disabling the feature removes only intact canaries that Aegis owns; a changed file is left untouched for review.
+
+This release does not block, terminate or suspend a process. Node's directory watcher does not identify the process responsible for a write, so alerts explicitly report **process not attributed**. Reliable attribution and enforcement require a signed, least-privilege Windows service plus native ETW/minifilter telemetry and a tested allow-policy based on process identity. Until that exists, an alert is evidence for review, not proof that ransomware is present.
+
+Encrypted recovery copies are also not enabled in 0.5.0. A post-change watcher cannot guarantee possession of the original bytes, and copying whole controlled folders would create unacceptable storage and privacy risks. Recovery requires a bounded pre-write capture layer, authenticated metadata, quotas and rollback tests. Microsoft Defender controlled-folder protection and normal backups should remain enabled.
+
 ## Protection for Downloads
 
 Every new desktop session starts a watcher for the Windows **Downloads**

@@ -1,6 +1,6 @@
 {
   "name": "aegis-guard",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Auditable Windows malware scanner with a secure desktop interface and encrypted quarantine",
   "type": "module",
@@ -17,7 +17,7 @@
     "dist:win:unsigned": "electron-builder --config electron-builder.yml --win nsis --x64 --publish never -c.forceCodeSigning=false",
     "demo": "node src/cli.mjs demo",
     "test": "node --test",
-    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/static-analysis.mjs && node --check src/definition-security.mjs && node --check src/authenticode.mjs && node --check src/report-writer.mjs && node --check src/network-audit.mjs && node --check src/quarantine.mjs && node --check src/simulator.mjs && node --check src/app-service.mjs && node --check src/drive-roots.mjs && node --check src/internal-paths.mjs && node --check src/watch-service.mjs && node --check desktop/main.mjs && node --check desktop/ipc-auth.mjs && node --check desktop/ipc-contracts.mjs && node --check desktop/scan-worker.mjs && node --check desktop/target-vault.mjs && node --check desktop/update-service.mjs && node --check desktop/preload.cjs && node --check desktop/renderer/app.js",
+    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/static-analysis.mjs && node --check src/definition-security.mjs && node --check src/ransomware-audit.mjs && node --check src/authenticode.mjs && node --check src/report-writer.mjs && node --check src/network-audit.mjs && node --check src/quarantine.mjs && node --check src/simulator.mjs && node --check src/app-service.mjs && node --check src/drive-roots.mjs && node --check src/internal-paths.mjs && node --check src/watch-service.mjs && node --check desktop/main.mjs && node --check desktop/ipc-auth.mjs && node --check desktop/ipc-contracts.mjs && node --check desktop/scan-worker.mjs && node --check desktop/target-vault.mjs && node --check desktop/update-service.mjs && node --check desktop/preload.cjs && node --check desktop/renderer/app.js",
     "ci": "npm run check && npm test"
   },
   "engines": {

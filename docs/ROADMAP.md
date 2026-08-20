@@ -51,6 +51,8 @@ Implementation boundary: 0.4.0 ships bounded PE structure/import parsing, ZIP ce
 - Block mode only after audit validation, with explicit allow rules based on identity rather than path alone.
 - Bounded, encrypted recovery copies and tested rollback after a confirmed event.
 
+Implementation boundary: 0.5.0 introduces an opt-in user-session audit for rapid distinct changes, high-rate disappearance, appended-extension rename correlation and identifiable canary tampering across Documents, Desktop and Pictures. Events are bounded, rate-limited, persisted and explicitly marked observed-only. Process attribution, block mode and encrypted pre-write recovery remain gated on signed native service/minifilter telemetry; the application must not claim those controls are active.
+
 ## 0.6.0 — Behavioral detection and local EDR
 
 - Process trees and incident timelines.

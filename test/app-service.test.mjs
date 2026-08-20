@@ -119,3 +119,26 @@ test('startup recovers an interrupted scan journal and reports degraded health',
   const stored=JSON.parse(await fs.readFile(path.join(dataDirectory,'state.json'),'utf8'));
   assert.equal(stored.activeOperation,null);
 });
+
+test('ransomware audit is opt-in, pauses with protection and removes only owned canaries when disabled', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-ransomware-service-'));
+  const dataDirectory = path.join(root, 'data');
+  const downloadsDirectory = path.join(root, 'downloads');
+  const documentsDirectory = path.join(root, 'documents');
+  await Promise.all([downloadsDirectory, documentsDirectory].map(directory => fs.mkdir(directory, { recursive: true })));
+  const service = new AppService({ baseDirectory, dataDirectory, downloadsDirectory, protectedDirectories: [documentsDirectory] });
+  t.after(async () => { await service.shutdown(); await fs.rm(root, { recursive: true, force: true }); });
+  let bootstrap = await service.init();
+  assert.equal(bootstrap.ransomwareAudit.configured, false);
+  assert.equal(bootstrap.ransomwareAudit.enabled, false);
+  await service.saveSettings({ ransomwareAuditEnabled: true });
+  bootstrap = await service.getBootstrap();
+  assert.equal(bootstrap.ransomwareAudit.enabled, true);
+  assert.equal(bootstrap.ransomwareAudit.rootsObserved, 1);
+  const canary = (await fs.readdir(documentsDirectory)).find(name => name.startsWith('_AegisGuard_Canary_'));
+  assert.ok(canary);
+  await service.pauseProtection();
+  assert.equal(service.getRansomwareAuditState().paused, true);
+  await service.saveSettings({ ransomwareAuditEnabled: false });
+  assert.equal(await fs.stat(path.join(documentsDirectory, canary)).then(() => true, () => false), false);
+});

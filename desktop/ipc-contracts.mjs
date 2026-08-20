@@ -125,13 +125,13 @@ export function parseIsolateResult(value) {
 
 export function parseSettings(value) {
   const input = assertPlainObject(value, 'settings');
-  assertOnlyKeys(input, ['theme', 'autoQuarantine', 'notifications', 'checkUpdates', 'updateChannel', 'launchAtStartup', 'scheduledScanEnabled', 'scheduledScanMode', 'scheduledScanHour', 'skipScheduledScanOnBattery']);
+  assertOnlyKeys(input, ['theme', 'autoQuarantine', 'notifications', 'checkUpdates', 'updateChannel', 'launchAtStartup', 'scheduledScanEnabled', 'scheduledScanMode', 'scheduledScanHour', 'skipScheduledScanOnBattery', 'ransomwareAuditEnabled']);
   const output = {};
   if (Object.hasOwn(input, 'theme')) {
     if (!THEMES.has(input.theme)) throw new ContractError('Unknown theme');
     output.theme = input.theme;
   }
-  for (const key of ['autoQuarantine', 'notifications', 'checkUpdates', 'launchAtStartup', 'scheduledScanEnabled', 'skipScheduledScanOnBattery']) {
+  for (const key of ['autoQuarantine', 'notifications', 'checkUpdates', 'launchAtStartup', 'scheduledScanEnabled', 'skipScheduledScanOnBattery', 'ransomwareAuditEnabled']) {
     if (Object.hasOwn(input, key)) {
       if (typeof input[key] !== 'boolean') throw new ContractError(`${key} must be a boolean`);
       output[key] = input[key];
@@ -168,7 +168,7 @@ export function parseWorkerRequest(value) {
 
 export function parseWorkerInitialization(value) {
   const input = assertPlainObject(value, 'service initialization');
-  assertOnlyKeys(input, ['baseDirectory', 'dataDirectory', 'downloadsDirectory', 'quarantineKeyBase64']);
+  assertOnlyKeys(input, ['baseDirectory', 'dataDirectory', 'downloadsDirectory', 'protectedDirectories', 'quarantineKeyBase64']);
   const result = {};
   for (const key of ['baseDirectory', 'dataDirectory', 'downloadsDirectory']) {
     const candidate = input[key];
@@ -177,6 +177,9 @@ export function parseWorkerInitialization(value) {
     }
     result[key] = path.resolve(candidate);
   }
+  const protectedDirectories = input.protectedDirectories ?? [];
+  if (!Array.isArray(protectedDirectories) || protectedDirectories.length > 8) throw new ContractError('Invalid protectedDirectories');
+  result.protectedDirectories = protectedDirectories.map(value => parseAbsolutePath(value, 'protected directory'));
   if (!isCanonicalKey(input.quarantineKeyBase64)) throw new ContractError('Invalid quarantine encryption key');
   result.quarantineKeyBase64 = input.quarantineKeyBase64;
   return result;

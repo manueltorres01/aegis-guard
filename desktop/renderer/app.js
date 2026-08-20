@@ -14,7 +14,7 @@ const VIEW_META = Object.freeze({
 
 const state = {
   activeView: 'home',
-  settings: { theme: 'system', autoQuarantine: false, launchAtStartup: true, scheduledScanEnabled: false, scheduledScanMode: 'quick', scheduledScanHour: 3, skipScheduledScanOnBattery: true },
+  settings: { theme: 'system', autoQuarantine: false, launchAtStartup: true, scheduledScanEnabled: false, scheduledScanMode: 'quick', scheduledScanHour: 3, skipScheduledScanOnBattery: true, ransomwareAuditEnabled: false },
   version: '—',
   engineVersion: '—',
   definitionsVersion: '—',
@@ -48,6 +48,7 @@ const state = {
     startedAt: null
   },
   protection: { active: false, paused: false, targetLabel: 'Descargas', sessionOnly: true },
+  ransomwareAudit: { mode: 'audit', configured: false, enabled: false, paused: false, blocking: false, rootsConfigured: 0, rootsObserved: 0, canariesActive: 0, recentAlerts: [] },
   startup: { supported: true, enabled: true, requested: true, launchesInBackground: true },
   monitor: { active: false, target: null },
   selectedMonitorTarget: null,
@@ -82,14 +83,15 @@ function cacheElements() {
     'scan-skipped-counter', 'scan-count-skipped',
     'scan-current-file', 'protection-visual', 'protection-overline', 'protection-status-heading',
     'protection-description', 'protection-target-label', 'toggle-protection', 'protection-pause-warning',
+    'ransomware-audit-overline', 'ransomware-audit-description', 'ransomware-audit-roots', 'ransomware-audit-alert',
     'monitor-overline', 'monitor-heading', 'monitor-description', 'monitor-target-label',
     'choose-monitor-target', 'start-monitor', 'stop-monitor', 'results-summary',
     'results-body', 'results-empty', 'quarantine-body', 'quarantine-empty', 'refresh-quarantine',
     'quarantine-inventory-warning', 'quarantine-inventory-warning-copy',
-    'theme-select', 'auto-quarantine', 'start-with-windows', 'startup-setting-note',
+    'theme-select', 'auto-quarantine', 'ransomware-audit-enabled', 'start-with-windows', 'startup-setting-note',
     'scheduled-scan-enabled', 'scheduled-scan-mode', 'scheduled-scan-hour', 'scheduled-scan-battery',
     'check-updates', 'restart-update', 'update-status', 'run-simulation',
-    'settings-save-status', 'health-summary', 'health-ipc', 'health-protection', 'health-persistence', 'fatal-panel', 'fatal-message', 'toast-region', 'restore-dialog',
+    'settings-save-status', 'health-summary', 'health-ipc', 'health-protection', 'health-persistence', 'health-ransomware', 'fatal-panel', 'fatal-message', 'toast-region', 'restore-dialog',
     'restore-dialog-copy', 'restore-cancel', 'restore-confirm', 'isolate-dialog',
     'isolate-dialog-copy', 'isolate-cancel', 'isolate-confirm', 'pause-protection-dialog',
     'pause-protection-cancel', 'pause-protection-confirm'
@@ -399,6 +401,23 @@ function renderProtection() {
     els['home-monitor-status'].textContent = 'Detenida';
   }
   els['home-monitor-status'].classList.toggle('is-active', active);
+}
+
+function renderRansomwareAudit() {
+  const audit = state.ransomwareAudit ?? {};
+  const configured = audit.configured === true;
+  const active = audit.enabled === true && !audit.paused;
+  els['ransomware-audit-overline'].textContent = active ? 'Auditoría activa · sin bloqueo' : configured && audit.paused ? 'Pausada con la protección global' : 'Modo auditoría desactivado';
+  els['ransomware-audit-description'].textContent = active
+    ? 'Observa cambios rápidos, borrados, extensiones añadidas y canarios. No detiene procesos automáticamente.'
+    : configured && audit.paused
+      ? 'La configuración se conserva y volverá a activarse al reanudar la protección.'
+      : 'Actívala en Ajustes para observar actividad compatible con ransomware sin bloquear procesos.';
+  els['ransomware-audit-roots'].textContent = `${formatCount(audit.rootsObserved)} de ${formatCount(audit.rootsConfigured)} carpetas observadas`;
+  const alert = Array.isArray(audit.recentAlerts) ? audit.recentAlerts[0] : null;
+  els['ransomware-audit-alert'].textContent = alert
+    ? `${formatDate(alert.at, 'Reciente')} · ${safeString(alert.explanation, 'Actividad anómala observada')} · proceso no atribuido`
+    : 'No hay alertas de auditoría recientes.';
 }
 
 function renderMonitor() {
@@ -1092,7 +1111,8 @@ async function saveSettings() {
     scheduledScanEnabled: Boolean(els['scheduled-scan-enabled'].checked),
     scheduledScanMode: els['scheduled-scan-mode'].value,
     scheduledScanHour: Number(els['scheduled-scan-hour'].value),
-    skipScheduledScanOnBattery: Boolean(els['scheduled-scan-battery'].checked)
+    skipScheduledScanOnBattery: Boolean(els['scheduled-scan-battery'].checked),
+    ransomwareAuditEnabled: Boolean(els['ransomware-audit-enabled'].checked)
   };
   state.settings = next;
   applyTheme(next.theme);
@@ -1114,6 +1134,7 @@ async function saveSettings() {
     state.settings = previous;
     els['theme-select'].value = previous.theme;
     els['auto-quarantine'].checked = previous.autoQuarantine;
+    els['ransomware-audit-enabled'].checked = previous.ransomwareAuditEnabled;
     syncScheduleSettings(previous);
     applyTheme(previous.theme);
     renderStartupSetting();
@@ -1354,6 +1375,24 @@ function handleAppEvent(rawEvent) {
     return;
   }
 
+  if (type === 'ransomware-audit-state') {
+    state.ransomwareAudit = event;
+    renderRansomwareAudit();
+    return;
+  }
+
+  if (type === 'ransomware-audit-alert') {
+    state.ransomwareAudit = {
+      ...state.ransomwareAudit,
+      recentAlerts: [event, ...(state.ransomwareAudit.recentAlerts ?? [])].slice(0, 20)
+    };
+    state.activity.unshift({ kind: 'monitor', title: 'Alerta ransomware en auditoría', description: `${safeString(event.rootLabel, 'Carpeta protegida')} · proceso no atribuido`, at: event.at });
+    renderRansomwareAudit();
+    renderActivity();
+    showToast('Actividad compatible con ransomware', 'Aegis la ha observado, pero esta versión no ha bloqueado ningún proceso.', 'warning');
+    return;
+  }
+
   if (type === 'monitor-started') {
     const target = state.selectedMonitorTarget || state.monitor.target || {};
     state.monitor = { active: true, target: { ...target, label: safeString(event.label ?? event.targetLabel, target.label) } };
@@ -1389,10 +1428,12 @@ function handleAppEvent(rawEvent) {
       scheduledScanEnabled: event.scheduledScanEnabled === true,
       scheduledScanMode: event.scheduledScanMode === 'full' ? 'full' : 'quick',
       scheduledScanHour: Number.isSafeInteger(event.scheduledScanHour) ? event.scheduledScanHour : 3,
-      skipScheduledScanOnBattery: event.skipScheduledScanOnBattery !== false
+      skipScheduledScanOnBattery: event.skipScheduledScanOnBattery !== false,
+      ransomwareAuditEnabled: event.ransomwareAuditEnabled === true
     };
     els['theme-select'].value = state.settings.theme;
     els['auto-quarantine'].checked = state.settings.autoQuarantine;
+    els['ransomware-audit-enabled'].checked = state.settings.ransomwareAuditEnabled;
     syncScheduleSettings(state.settings);
     renderStartupSetting();
     applyTheme(state.settings.theme);
@@ -1435,7 +1476,8 @@ function normalizeBootstrap(data = {}) {
       scheduledScanEnabled: settings.scheduledScanEnabled === true,
       scheduledScanMode: settings.scheduledScanMode === 'full' ? 'full' : 'quick',
       scheduledScanHour: Number.isSafeInteger(settings.scheduledScanHour) ? settings.scheduledScanHour : 3,
-      skipScheduledScanOnBattery: settings.skipScheduledScanOnBattery !== false
+      skipScheduledScanOnBattery: settings.skipScheduledScanOnBattery !== false,
+      ransomwareAuditEnabled: settings.ransomwareAuditEnabled === true
     },
     quarantine,
     quarantineInventory: {
@@ -1454,6 +1496,9 @@ function normalizeBootstrap(data = {}) {
     protection: data.protection && typeof data.protection === 'object'
       ? data.protection
       : { active: true, paused: false, targetLabel: 'Descargas', sessionOnly: true },
+    ransomwareAudit: data.ransomwareAudit && typeof data.ransomwareAudit === 'object'
+      ? data.ransomwareAudit
+      : { mode: 'audit', configured: false, enabled: false, paused: false, blocking: false, rootsConfigured: 0, rootsObserved: 0, canariesActive: 0, recentAlerts: [] },
     startup: data.startup && typeof data.startup === 'object'
       ? data.startup
       : { supported: true, enabled: settings.launchAtStartup !== false, requested: settings.launchAtStartup !== false, launchesInBackground: true },
@@ -1483,6 +1528,11 @@ function applyBootstrap(rawData) {
     autoQuarantine: Boolean(data.protection.autoQuarantine),
     sessionOnly: data.protection.sessionOnly !== false
   };
+  state.ransomwareAudit = {
+    mode: 'audit', configured: Boolean(data.ransomwareAudit.configured), enabled: Boolean(data.ransomwareAudit.enabled), paused: Boolean(data.ransomwareAudit.paused), blocking: false,
+    rootsConfigured: safeNumber(data.ransomwareAudit.rootsConfigured), rootsObserved: safeNumber(data.ransomwareAudit.rootsObserved),
+    canariesActive: safeNumber(data.ransomwareAudit.canariesActive), recentAlerts: Array.isArray(data.ransomwareAudit.recentAlerts) ? data.ransomwareAudit.recentAlerts.slice(0, 20) : []
+  };
   state.startup = {
     supported: data.startup.supported !== false,
     enabled: Boolean(data.startup.enabled),
@@ -1504,12 +1554,14 @@ function applyBootstrap(rawData) {
   els['about-definitions'].textContent = data.definitionsVersion;
   els['theme-select'].value = data.settings.theme;
   els['auto-quarantine'].checked = data.settings.autoQuarantine;
+  els['ransomware-audit-enabled'].checked = data.settings.ransomwareAuditEnabled;
   syncScheduleSettings(data.settings);
   renderStartupSetting();
   applyTheme(data.settings.theme);
   renderHomeStatus();
   renderActivity();
   renderProtection();
+  renderRansomwareAudit();
   renderMonitor();
   renderResults();
   renderNetwork();
@@ -1523,6 +1575,7 @@ function renderHealth() {
   els['health-ipc'].textContent = health.authenticatedWorkerIpc ? 'Autenticado' : 'No disponible';
   els['health-protection'].textContent = health.protectionAvailable ? 'Disponible' : 'Degradada';
   els['health-persistence'].textContent = health.statePersistenceAvailable ? 'Disponible' : 'Degradada';
+  els['health-ransomware'].textContent = state.settings.ransomwareAuditEnabled ? health.ransomwareAuditAvailable ? 'Auditoría disponible' : 'Degradada' : 'Desactivada';
 }
 
 function bindEvents() {
@@ -1557,6 +1610,7 @@ function bindEvents() {
 
   els['theme-select'].addEventListener('change', () => void saveSettings());
   els['auto-quarantine'].addEventListener('change', () => void saveSettings());
+  els['ransomware-audit-enabled'].addEventListener('change', () => void saveSettings());
   els['start-with-windows'].addEventListener('change', () => void saveSettings());
   for (const id of ['scheduled-scan-enabled', 'scheduled-scan-mode', 'scheduled-scan-hour', 'scheduled-scan-battery']) {
     els[id].addEventListener('change', () => void saveSettings());
@@ -1623,7 +1677,7 @@ async function initialize() {
 
 function createPreviewBridge() {
   const listeners = new Set();
-  let previewSettings = { theme: 'system', autoQuarantine: false, launchAtStartup: true, scheduledScanEnabled: false, scheduledScanMode: 'quick', scheduledScanHour: 3, skipScheduledScanOnBattery: true };
+  let previewSettings = { theme: 'system', autoQuarantine: false, launchAtStartup: true, scheduledScanEnabled: false, scheduledScanMode: 'quick', scheduledScanHour: 3, skipScheduledScanOnBattery: true, ransomwareAuditEnabled: false };
   let previewProtection = { active: true, paused: false, targetLabel: 'Descargas', autoQuarantine: false, sessionOnly: true };
   let scanSequence = 0;
   let monitorActive = false;
@@ -1709,15 +1763,16 @@ function createPreviewBridge() {
   return Object.freeze({
     async getBootstrap() {
       return {
-        app: { version: '0.3.0-preview' },
-        engine: { version: '0.3.0' },
+        app: { version: '0.5.0-preview' },
+        engine: { version: '0.5.0' },
         definitions: { version: '2026.08.18-local' },
         settings: previewSettings,
         protection: previewProtection,
+        ransomwareAudit: {mode:'audit',configured:previewSettings.ransomwareAuditEnabled,enabled:previewSettings.ransomwareAuditEnabled,paused:false,blocking:false,rootsConfigured:3,rootsObserved:previewSettings.ransomwareAuditEnabled?3:0,canariesActive:previewSettings.ransomwareAuditEnabled?3:0,recentAlerts:[]},
         startup: { supported: true, enabled: previewSettings.launchAtStartup, requested: previewSettings.launchAtStartup, launchesInBackground: true },
         stats: { totalScanned: 148 },
         reportAvailable: true,
-        health: {status:'healthy',authenticatedWorkerIpc:true,protectionAvailable:true,statePersistenceAvailable:true,recoveredInterruptedOperation:false},
+        health: {status:'healthy',authenticatedWorkerIpc:true,protectionAvailable:true,statePersistenceAvailable:true,recoveredInterruptedOperation:false,ransomwareAuditAvailable:true},
         network: { completedAt:'2026-08-20T09:30:00.000Z',reportAvailable:true,summary:{connections:2,suspicious:0,unsignedProcesses:1,truncated:false},windowsSecurity:{firewall:[{name:'Domain',enabled:true},{name:'Private',enabled:true},{name:'Public',enabled:true}],defender:{antivirusEnabled:true,realTimeProtectionEnabled:true,networkInspectionEnabled:true}},events:[{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'162.159.135.234',remotePort:443,domain:'discord.com',process:{id:4120,name:'Discord',path:'C:\\Usuarios\\Demo\\AppData\\Local\\Discord\\Discord.exe'},signature:{status:'valid',publisher:'Discord Inc.'}},{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'20.190.160.1',remotePort:443,domain:'login.microsoftonline.com',process:{id:1052,name:'msedge',path:'C:\\Program Files\\Microsoft\\Edge\\msedge.exe'},signature:{status:'valid',publisher:'Microsoft Corporation'}}]},
         lastScan: {
           completedAt: '2026-08-18T08:35:00.000Z',
@@ -1824,8 +1879,10 @@ function createPreviewBridge() {
         scheduledScanEnabled: settings?.scheduledScanEnabled === true,
         scheduledScanMode: settings?.scheduledScanMode === 'full' ? 'full' : 'quick',
         scheduledScanHour: Number.isSafeInteger(settings?.scheduledScanHour) ? settings.scheduledScanHour : 3,
-        skipScheduledScanOnBattery: settings?.skipScheduledScanOnBattery !== false
+        skipScheduledScanOnBattery: settings?.skipScheduledScanOnBattery !== false,
+        ransomwareAuditEnabled: settings?.ransomwareAuditEnabled === true
       };
+      emit({type:'ransomware-audit-state',mode:'audit',configured:previewSettings.ransomwareAuditEnabled,enabled:previewSettings.ransomwareAuditEnabled,paused:false,blocking:false,rootsConfigured:3,rootsObserved:previewSettings.ransomwareAuditEnabled?3:0,canariesActive:previewSettings.ransomwareAuditEnabled?3:0,recentAlerts:[]});
       return { settings: { ...previewSettings } };
     },
     async createAndScanSimulation() {

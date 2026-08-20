@@ -149,6 +149,7 @@ async function startApplication() {
     baseDirectory: app.getAppPath(),
     dataDirectory: app.getPath('userData'),
     downloadsDirectory: app.getPath('downloads'),
+    protectedDirectories: [app.getPath('documents'), app.getPath('desktop'), app.getPath('pictures')],
     quarantineKeyBase64: quarantineKey.value
   });
   scheduledSettings = sanitizeSettings(initialBootstrap?.settings);
@@ -906,6 +907,10 @@ function sanitizeWorkerEvent(event) {
       return { type: event.type, payload: { message: 'La protección de Descargas no está disponible.' } };
     case 'protection-warning':
       return { type: event.type, payload: { message: 'La cola de protección está llena; recomendamos analizar Descargas.' } };
+    case 'ransomware-audit-state':
+      return { type: event.type, payload: sanitizeRansomwareAudit(payload) };
+    case 'ransomware-audit-alert':
+      return { type: event.type, payload: sanitizeRansomwareAlert(payload) };
     case 'quarantine-changed':
       {
         const item = payload.item ? sanitizeQuarantineItem(payload.item) : null;
@@ -968,6 +973,7 @@ function sanitizeBootstrap(value) {
     },
     monitor: sanitizeMonitorState(input.monitor, activeMonitorContext),
     protection: sanitizeProtectionState(input.protection),
+    ransomwareAudit: sanitizeRansomwareAudit(input.ransomwareAudit),
     updates: {
       ...(updateService?.publicState() ?? { status: 'unavailable' }),
       supported: updateService?.status !== 'unavailable',
@@ -983,7 +989,8 @@ function sanitizeHealth(value) {
     authenticatedWorkerIpc: Boolean(input.authenticatedWorkerIpc),
     protectionAvailable: Boolean(input.protectionAvailable),
     statePersistenceAvailable: Boolean(input.statePersistenceAvailable),
-    recoveredInterruptedOperation: Boolean(input.recoveredInterruptedOperation)
+    recoveredInterruptedOperation: Boolean(input.recoveredInterruptedOperation),
+    ransomwareAuditAvailable: Boolean(input.ransomwareAuditAvailable)
   };
 }
 
@@ -997,6 +1004,30 @@ function sanitizeNetworkReport(value) {
     signature: { status:item?.signature?.status==='valid'?'valid':'unverified', publisher:safeText(item?.signature?.publisher,300) }
   })) : [];
   return { completedAt:safeDate(input.completedAt), reportAvailable:Boolean(input.reportAvailable), summary:{connections:safeCount(input.summary?.connections),suspicious:safeCount(input.summary?.suspicious),unsignedProcesses:safeCount(input.summary?.unsignedProcesses),truncated:Boolean(input.summary?.truncated)}, windowsSecurity:{firewall:Array.isArray(input.windowsSecurity?.firewall)?input.windowsSecurity.firewall.slice(0,8).map(x=>({name:safeLabel(x?.name),enabled:Boolean(x?.enabled),defaultInboundAction:safeLabel(x?.defaultInboundAction),defaultOutboundAction:safeLabel(x?.defaultOutboundAction)})):[],defender:input.windowsSecurity?.defender?{antivirusEnabled:Boolean(input.windowsSecurity.defender.antivirusEnabled),realTimeProtectionEnabled:Boolean(input.windowsSecurity.defender.realTimeProtectionEnabled),networkInspectionEnabled:Boolean(input.windowsSecurity.defender.networkInspectionEnabled)}:null}, events };
+}
+
+function sanitizeRansomwareAudit(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    mode: 'audit', configured: Boolean(input.configured), enabled: Boolean(input.enabled), paused: Boolean(input.paused), blocking: false,
+    rootsConfigured: Math.min(8, safeCount(input.rootsConfigured)), rootsObserved: Math.min(8, safeCount(input.rootsObserved)),
+    degradedRoots: Math.min(8, safeCount(input.degradedRoots)), canariesActive: Math.min(8, safeCount(input.canariesActive)),
+    processAttribution: 'unavailable',
+    recentAlerts: Array.isArray(input.recentAlerts) ? input.recentAlerts.slice(0, 20).map(sanitizeRansomwareAlert) : []
+  };
+}
+
+function sanitizeRansomwareAlert(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    id: safeUuid(input.id), at: safeDate(input.at),
+    kind: ['canary-tamper', 'mass-extension-change', 'high-rate-deletion', 'high-rate-file-change'].includes(input.kind) ? input.kind : 'high-rate-file-change',
+    severity: ['medium', 'high', 'critical'].includes(input.severity) ? input.severity : 'medium',
+    mode: 'audit', rootLabel: safeLabel(input.rootLabel), fileName: safeLabel(input.fileName),
+    counts: { changed: safeCount(input.counts?.changed), deleted: safeCount(input.counts?.deleted), extensionChanges: safeCount(input.counts?.extensionChanges) },
+    process: { attributed: false, reason: 'La atribución por proceso requiere telemetría nativa.' },
+    action: 'observed-only', explanation: safeText(input.explanation, 500)
+  };
 }
 
 function sanitizeScanReport(value, context) {
@@ -1131,7 +1162,8 @@ function sanitizeSettings(value) {
     scheduledScanEnabled: Boolean(input.scheduledScanEnabled),
     scheduledScanMode: input.scheduledScanMode === 'full' ? 'full' : 'quick',
     scheduledScanHour: Number.isSafeInteger(input.scheduledScanHour) && input.scheduledScanHour >= 0 && input.scheduledScanHour <= 23 ? input.scheduledScanHour : 3,
-    skipScheduledScanOnBattery: input.skipScheduledScanOnBattery !== false
+    skipScheduledScanOnBattery: input.skipScheduledScanOnBattery !== false,
+    ransomwareAuditEnabled: Boolean(input.ransomwareAuditEnabled)
   };
 }
 
@@ -1142,11 +1174,11 @@ function sanitizeActivity(value) {
   const displayPath = compactPath(input.path);
   return {
     type,
-    kind: type === 'restore' ? 'quarantine' : type.startsWith('monitor') || type.startsWith('protection') ? 'monitor' : 'scan',
-    title: type === 'restore' ? 'Archivo restaurado' : type.startsWith('monitor') || type.startsWith('protection') ? 'Detección de vigilancia' : 'Análisis completado',
+    kind: type === 'restore' ? 'quarantine' : type === 'ransomware-audit' || type.startsWith('monitor') || type.startsWith('protection') ? 'monitor' : 'scan',
+    title: type === 'restore' ? 'Archivo restaurado' : type === 'ransomware-audit' ? 'Alerta ransomware en auditoría' : type.startsWith('monitor') || type.startsWith('protection') ? 'Detección de vigilancia' : 'Análisis completado',
     description: summary
       ? `${summary.scanned} archivos · ${summary.malicious + summary.suspicious} indicios`
-      : displayPath || 'Actividad de Aegis',
+      : type === 'ransomware-audit' ? `${safeLabel(input.rootLabel)} · sin bloqueo automático` : displayPath || 'Actividad de Aegis',
     at: safeDate(input.at),
     path: displayPath,
     verdict: ['clean', 'suspicious', 'malicious', 'skipped', 'error'].includes(input.verdict) ? input.verdict : undefined,

@@ -86,6 +86,12 @@ test('scheduled scan settings are bounded and battery-safe', () => {
   assert.throws(() => parseSettings({skipScheduledScanOnBattery:'yes'}), ContractError);
 });
 
+test('ransomware audit setting is an explicit boolean only', () => {
+  assert.deepEqual(parseSettings({ ransomwareAuditEnabled: true }), { ransomwareAuditEnabled: true });
+  assert.deepEqual(parseSettings({ ransomwareAuditEnabled: false }), { ransomwareAuditEnabled: false });
+  assert.throws(() => parseSettings({ ransomwareAuditEnabled: 'audit' }), ContractError);
+});
+
 test('report export contracts accept only JSON and CSV', () => {
   assert.deepEqual(parseExportReport({ format: 'json' }), { format: 'json' });
   assert.deepEqual(parseWorkerActionPayload(WORKER_ACTIONS.getLatestReport, { format: 'csv' }), { format: 'csv' });
@@ -109,6 +115,16 @@ test('worker initialization requires absolute internal paths and a canonical 32-
     quarantineKeyBase64: key
   });
   assert.equal(parsed.quarantineKeyBase64, key);
+  assert.deepEqual(parsed.protectedDirectories, []);
+  const protectedDirectory = 'C:\\Users\\Demo\\Documents';
+  assert.deepEqual(parseWorkerInitialization({
+    baseDirectory: 'C:\\Aegis', dataDirectory: 'C:\\Data', downloadsDirectory: 'C:\\Downloads',
+    protectedDirectories: [protectedDirectory], quarantineKeyBase64: key
+  }).protectedDirectories, [protectedDirectory]);
+  assert.throws(() => parseWorkerInitialization({
+    baseDirectory: 'C:\\Aegis', dataDirectory: 'C:\\Data', downloadsDirectory: 'C:\\Downloads',
+    protectedDirectories: ['relative'], quarantineKeyBase64: key
+  }), ContractError);
   assert.throws(() => parseWorkerInitialization({
     baseDirectory: '.', dataDirectory: 'data', downloadsDirectory: 'downloads', quarantineKeyBase64: key
   }), ContractError);
