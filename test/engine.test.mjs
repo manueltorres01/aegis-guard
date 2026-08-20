@@ -122,3 +122,25 @@ test('does not trust a valid signature from an unlisted publisher', async t => {
   assert.equal(result.verdict, 'suspicious');
   assert.equal(result.score, 28);
 });
+
+test('verified application trust requires both the expected publisher and installation root', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-app-policy-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const installed = path.join(dir, 'Discord', 'app-1', 'Discord.exe');
+  const copied = path.join(dir, 'Elsewhere', 'Discord.exe');
+  await fs.mkdir(path.dirname(installed), { recursive: true });
+  await fs.mkdir(path.dirname(copied), { recursive: true });
+  const content = Buffer.concat([Buffer.from('MZ CreateRemoteThread VirtualAllocEx WriteProcessMemory '), Buffer.alloc(8192, 65)]);
+  await Promise.all([fs.writeFile(installed, content), fs.writeFile(copied, content)]);
+  const engine = new ScanEngine({
+    definitions, threshold: 60, maxFileSizeMb: 1,
+    trustedApplicationPolicies: [{ publisher: 'Discord Inc.', roots: [path.join(dir, 'Discord')] }],
+    trustVerifier: async () => ({ status: 'valid', subject: 'CN=Discord Inc., O=Discord Inc.', organization: 'Discord Inc.' })
+  });
+  const trusted = await engine.scanFile(installed);
+  const outside = await engine.scanFile(copied);
+  assert.equal(trusted.verdict, 'clean');
+  assert.equal(trusted.trust.applicationVerified, true);
+  assert.equal(outside.verdict, 'suspicious');
+  assert.equal(outside.trust.applicationVerified, false);
+});

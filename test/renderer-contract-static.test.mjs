@@ -51,3 +51,37 @@ test('renderer preserves bounded quarantine inventory counts and exposes a persi
   assert.notEqual(sanitizerStart, -1, 'quarantine inventory sanitizer is missing');
   assert.match(sanitizerBlock, /hasMore:\s*truncatedCount\s*>\s*0/);
 });
+
+test('results expose exact 0.2.2 filters, native report export, and original-path restore', async () => {
+  const [source, html, desktopMain] = await Promise.all([
+    fs.readFile(rendererFile, 'utf8'),
+    fs.readFile(rendererHtmlFile, 'utf8'),
+    fs.readFile(desktopMainFile, 'utf8')
+  ]);
+  for (const filter of ['all', 'suspicious', 'not-scanned', 'malicious']) {
+    assert.match(html, new RegExp(`data-filter="${filter}"`));
+  }
+  assert.match(html, /id="export-report-json"/);
+  assert.match(html, /id="export-report-csv"/);
+  assert.match(source, /callApi\('exportReport'/);
+
+  const restoreStart = desktopMain.indexOf('async function restoreQuarantine');
+  const restoreEnd = desktopMain.indexOf('\nasync function ', restoreStart + 1);
+  const restoreBlock = desktopMain.slice(restoreStart, restoreEnd);
+  assert.match(restoreBlock, /metadata\.originalPath/);
+  assert.doesNotMatch(restoreBlock, /showSaveDialog/);
+});
+
+test('0.2.3 exposes bounded network audit and report export without block controls', async () => {
+  const [source, html] = await Promise.all([
+    fs.readFile(rendererFile, 'utf8'),
+    fs.readFile(rendererHtmlFile, 'utf8')
+  ]);
+  assert.match(html, /data-view="network"/);
+  assert.match(html, /id="run-network-audit"/);
+  assert.match(html, /id="export-network-json"/);
+  assert.match(html, /Modo auditoría/);
+  assert.doesNotMatch(html, /Bloquear conexión/);
+  assert.match(source, /runNetworkAudit/);
+  assert.match(source, /exportNetworkReport/);
+});

@@ -1364,6 +1364,15 @@ svg {
   padding: 3px;
 }
 
+.results-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.compact-row { gap: 8px; }
+
 .filter-button {
   border-radius: 7px;
   background: transparent;

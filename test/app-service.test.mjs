@@ -55,6 +55,11 @@ test('AppService defaults to manual quarantine and keeps desktop data under data
   assert.equal((await fs.stat(path.join(dataDirectory, 'quarantine', `${quarantined.items[0].id}.bin`))).isFile(), true);
   assert.equal((await fs.stat(path.join(dataDirectory, 'quarantine', `${quarantined.items[0].id}.json`))).isFile(), true);
   const populatedBootstrap = await service.getBootstrap();
+  const latestJson = await service.getLatestReport('json');
+  const latestCsv = await service.getLatestReport('csv');
+  assert.equal(JSON.parse(await fs.readFile(latestJson.path, 'utf8')).results.length, 1);
+  assert.match(await fs.readFile(latestCsv.path, 'utf8'), /"path","verdict"/);
+  assert.equal(populatedBootstrap.reportAvailable, true);
   assert.equal(populatedBootstrap.quarantineCount, 1);
   assert.equal(populatedBootstrap.quarantine.length, 1);
   assert.equal(populatedBootstrap.quarantineInventory.total, 1);

@@ -6,6 +6,7 @@ const VIEW_META = Object.freeze({
   home: { title: 'Inicio', eyebrow: 'Resumen' },
   scan: { title: 'Analizar', eyebrow: 'Detección local' },
   protection: { title: 'Protección', eyebrow: 'Vigilancia de Descargas' },
+  network: { title: 'Red', eyebrow: 'Auditoría local' },
   results: { title: 'Resultados', eyebrow: 'Historial de análisis' },
   quarantine: { title: 'Cuarentena', eyebrow: 'Almacén cifrado' },
   settings: { title: 'Ajustes', eyebrow: 'Preferencias' }
@@ -19,6 +20,8 @@ const state = {
   definitionsVersion: '—',
   results: [],
   resultsTruncated: 0,
+  reportAvailable: false,
+  network: null,
   quarantine: [],
   quarantineInventory: { total: 0, truncatedCount: 0, corruptCount: 0, oversizedCount: 0 },
   activity: [],
@@ -67,6 +70,8 @@ function cacheElements() {
     'sidebar-version', 'about-version', 'engine-version', 'definitions-version', 'about-definitions',
     'home-status-card', 'status-emblem', 'status-overline', 'home-heading', 'home-status-description',
     'last-scan-label', 'metric-scanned', 'metric-findings', 'metric-quarantine', 'activity-list',
+    'export-report-json', 'export-report-csv', 'run-network-audit', 'export-network-json', 'export-network-csv',
+    'network-summary', 'network-firewall-state', 'network-defender-state', 'network-event-count', 'network-alert-count', 'network-body', 'network-empty',
     'home-monitor-title', 'home-monitor-status', 'results-badge', 'quarantine-badge',
     'scan-choices', 'scan-workspace', 'scan-state-icon', 'scan-phase-label', 'scan-status-title',
     'scan-target-label', 'cancel-scan', 'scan-progress-track', 'scan-progress-value',
@@ -437,6 +442,7 @@ function renderStartupSetting() {
 
 function resultReason(result) {
   if (safeString(result.reason)) return safeString(result.reason);
+  if (safeString(result.error)) return safeString(result.error);
   const findings = Array.isArray(result.findings) ? result.findings : [];
   return findings.length
     ? safeString(findings[0]?.description ?? findings[0]?.name ?? findings[0]?.id, 'Regla local')
@@ -447,9 +453,13 @@ function resultReason(result) {
 
 function renderResults() {
   const body = els['results-body'];
-  const visible = state.resultFilter === 'attention'
-    ? state.results.filter(result => normalizeVerdict(result.verdict) !== 'clean')
-    : state.results;
+  const visible = state.results.filter(result => {
+    const verdict = normalizeVerdict(result.verdict);
+    if (state.resultFilter === 'suspicious') return verdict === 'suspicious';
+    if (state.resultFilter === 'malicious') return verdict === 'malicious';
+    if (state.resultFilter === 'not-scanned') return verdict === 'error' || verdict === 'skipped';
+    return true;
+  });
   body.replaceChildren();
   els['results-empty'].hidden = visible.length > 0;
   body.parentElement.parentElement.hidden = visible.length === 0;
@@ -460,6 +470,8 @@ function renderResults() {
     : 'Todavía no hay análisis registrados.';
   els['results-badge'].hidden = attention === 0;
   els['results-badge'].textContent = attention > 99 ? '99+' : String(attention);
+  els['export-report-json'].disabled = !state.reportAvailable;
+  els['export-report-csv'].disabled = !state.reportAvailable;
 
   for (const result of visible) {
     const row = document.createElement('tr');
@@ -508,6 +520,44 @@ function renderResults() {
     row.append(verdictCell, fileCell, scoreCell, reasonCell, actionCell);
     body.append(row);
   }
+}
+
+function renderNetwork() {
+  const report = state.network;
+  const events = Array.isArray(report?.events) ? report.events : [];
+  const summary = report?.summary ?? {};
+  const firewall = Array.isArray(report?.windowsSecurity?.firewall) ? report.windowsSecurity.firewall : [];
+  const defender = report?.windowsSecurity?.defender;
+  els['network-summary'].textContent = report?.completedAt ? `Última captura: ${formatDate(report.completedAt)}.` : 'Realiza una captura para atribuir conexiones salientes a sus procesos.';
+  els['network-firewall-state'].textContent = firewall.length && firewall.every(profile => profile.enabled) ? 'Firewall activo' : firewall.length ? 'Revisar Firewall' : 'Firewall sin comprobar';
+  els['network-defender-state'].textContent = defender?.antivirusEnabled && defender?.realTimeProtectionEnabled ? 'Defender activo' : defender ? 'Revisar Defender' : 'Defender sin comprobar';
+  els['network-event-count'].textContent = `${formatCount(summary.connections ?? events.length)} conexiones`;
+  els['network-alert-count'].textContent = `${formatCount(summary.suspicious)} coincidencias con indicadores.`;
+  els['export-network-json'].disabled = !report?.reportAvailable;
+  els['export-network-csv'].disabled = !report?.reportAvailable;
+  els['network-empty'].hidden = events.length > 0;
+  const body = els['network-body']; body.replaceChildren(); body.parentElement.parentElement.hidden = events.length === 0;
+  for (const event of events) {
+    const row=document.createElement('tr');
+    const status=document.createElement('td'); const pill=document.createElement('span'); pill.className=`verdict-pill ${event.verdict==='suspicious'?'suspicious':'clean'}`; pill.textContent=event.verdict==='suspicious'?'Sospechoso':'Observado'; status.append(pill);
+    const destination=document.createElement('td'); destination.className='file-cell'; const target=document.createElement('strong'); target.textContent=event.domain||event.remoteAddress||'Destino desconocido'; const endpoint=document.createElement('small'); endpoint.textContent=`${event.remoteAddress||'—'}:${safeNumber(event.remotePort)}`; destination.append(target,endpoint);
+    const processCell=document.createElement('td'); processCell.className='file-cell'; const processName=document.createElement('strong'); processName.textContent=safeString(event.process?.name,'Proceso desconocido'); const processPath=document.createElement('small'); processPath.textContent=safeString(event.process?.path,`PID ${safeNumber(event.process?.id)}`); processCell.append(processName,processPath);
+    const signature=document.createElement('td'); signature.textContent=event.signature?.status==='valid'?safeString(event.signature.publisher,'Firma válida'):'Sin verificar';
+    const explanation=document.createElement('td'); explanation.textContent=safeString(event.explanation,'Conexión observada.');
+    row.append(status,destination,processCell,signature,explanation); body.append(row);
+  }
+}
+
+async function runNetworkAudit() {
+  els['run-network-audit'].disabled=true; setEngineStatus('Auditando red','busy');
+  try { state.network=await callApi('runNetworkAudit'); renderNetwork(); showToast('Auditoría completada',`${formatCount(state.network?.summary?.connections)} conexiones observadas.`,'success'); }
+  catch(error){ showToast('No se pudo auditar la red',errorMessage(error),'error'); }
+  finally { els['run-network-audit'].disabled=false; setEngineStatus('Motor listo'); }
+}
+
+async function exportNetworkReport(format) {
+  try { const response=await callApi('exportNetworkReport',{format}); if(!response?.cancelled)showToast('Informe guardado',safeString(response?.label,'Informe de red exportado.'),'success'); }
+  catch(error){ showToast('No se pudo exportar',errorMessage(error),'error'); }
 }
 
 function renderQuarantine() {
@@ -702,6 +752,7 @@ function applyCompletedScan(report = {}, { announce = true } = {}) {
   const summary = getSummary(report);
   const results = normalizeResults(report);
   if (results.length) state.results = results;
+  state.reportAvailable = report.reportAvailable !== false;
   state.resultsTruncated = safeNumber(report.resultsTruncated);
   const completedAt = report.completedAt ?? report.finishedAt ?? new Date().toISOString();
   state.lastScan = { ...summary, completedAt };
@@ -995,6 +1046,20 @@ async function confirmRestore() {
     showToast('No se pudo restaurar', errorMessage(error), 'error');
   } finally {
     els['restore-confirm'].disabled = false;
+  }
+}
+
+async function exportReport(format) {
+  const button = els[`export-report-${format}`];
+  button.disabled = true;
+  try {
+    const response = await callApi('exportReport', { format });
+    if (response?.cancelled) return;
+    showToast('Informe guardado', `${format.toUpperCase()} completo: ${formatCount(response?.count)} registros.`, 'success');
+  } catch (error) {
+    showToast('No se pudo guardar el informe', errorMessage(error), 'error');
+  } finally {
+    button.disabled = !state.reportAvailable;
   }
 }
 
@@ -1346,6 +1411,8 @@ function normalizeBootstrap(data = {}) {
       oversizedCount: safeNumber(rawQuarantineInventory.oversizedCount)
     },
     results,
+    reportAvailable: Boolean(data.reportAvailable),
+    network: data.network && typeof data.network === 'object' ? data.network : null,
     activity: Array.isArray(data.activity ?? data.history) ? (data.activity ?? data.history) : [],
     lastScan,
     totalScanned: safeNumber(stats.totalScanned ?? data.totalScanned ?? persisted.totalScanned ?? getSummary(lastScan ?? {}).scanned),
@@ -1368,6 +1435,8 @@ function applyBootstrap(rawData) {
   state.quarantine = data.quarantine;
   state.quarantineInventory = data.quarantineInventory;
   state.results = data.results;
+  state.reportAvailable = data.reportAvailable;
+  state.network = data.network;
   state.activity = data.activity;
   state.lastScan = data.lastScan;
   state.totalScanned = data.totalScanned;
@@ -1406,6 +1475,7 @@ function applyBootstrap(rawData) {
   renderProtection();
   renderMonitor();
   renderResults();
+  renderNetwork();
   renderQuarantine();
 }
 
@@ -1421,6 +1491,11 @@ function bindEvents() {
   els['start-monitor'].addEventListener('click', () => void startMonitor());
   els['stop-monitor'].addEventListener('click', () => void stopMonitor());
   els['refresh-quarantine'].addEventListener('click', () => void refreshQuarantine());
+  els['export-report-json'].addEventListener('click', () => void exportReport('json'));
+  els['export-report-csv'].addEventListener('click', () => void exportReport('csv'));
+  els['run-network-audit'].addEventListener('click', () => void runNetworkAudit());
+  els['export-network-json'].addEventListener('click', () => void exportNetworkReport('json'));
+  els['export-network-csv'].addEventListener('click', () => void exportNetworkReport('csv'));
 
   for (const button of all('.filter-button')) {
     button.addEventListener('click', () => {
@@ -1566,6 +1641,7 @@ function createPreviewBridge() {
     const report = {
       status: 'completed', scanId: previewScanId, mode, completedAt: new Date().toISOString(), targetLabel: label, results,
       resultsTruncated: exhaustive ? Math.max(0, total - results.length) : 0,
+      reportAvailable: true,
       summary: {
         scanned: total, total,
         malicious: simulation ? 1 : 0,
@@ -1584,13 +1660,15 @@ function createPreviewBridge() {
   return Object.freeze({
     async getBootstrap() {
       return {
-        app: { version: '0.2.0-preview' },
-        engine: { version: '0.2.0' },
+        app: { version: '0.2.3-preview' },
+        engine: { version: '0.2.3' },
         definitions: { version: '2026.08.18-local' },
         settings: previewSettings,
         protection: previewProtection,
         startup: { supported: true, enabled: previewSettings.launchAtStartup, requested: previewSettings.launchAtStartup, launchesInBackground: true },
         stats: { totalScanned: 148 },
+        reportAvailable: true,
+        network: { completedAt:'2026-08-20T09:30:00.000Z',reportAvailable:true,summary:{connections:2,suspicious:0,unsignedProcesses:1,truncated:false},windowsSecurity:{firewall:[{name:'Domain',enabled:true},{name:'Private',enabled:true},{name:'Public',enabled:true}],defender:{antivirusEnabled:true,realTimeProtectionEnabled:true,networkInspectionEnabled:true}},events:[{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'162.159.135.234',remotePort:443,domain:'discord.com',process:{id:4120,name:'Discord',path:'C:\\Usuarios\\Demo\\AppData\\Local\\Discord\\Discord.exe'},signature:{status:'valid',publisher:'Discord Inc.'}},{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'20.190.160.1',remotePort:443,domain:'login.microsoftonline.com',process:{id:1052,name:'msedge',path:'C:\\Program Files\\Microsoft\\Edge\\msedge.exe'},signature:{status:'valid',publisher:'Microsoft Corporation'}}]},
         lastScan: {
           completedAt: '2026-08-18T08:35:00.000Z',
           summary: { scanned: 24, total: 24, malicious: 0, suspicious: 0, errors: 0, quarantined: 0 }
@@ -1635,6 +1713,18 @@ function createPreviewBridge() {
       quarantine = quarantine.filter(item => item.id !== id);
       emit({ type: 'quarantine-updated' });
       return { label: 'Documentos · Archivo restaurado' };
+    },
+    async exportReport({ format } = {}) {
+      if (!['json', 'csv'].includes(format)) throw new Error('Formato no válido.');
+      return { cancelled: false, format, count: 24, label: `Aegis-Guard-informe-preview.${format}` };
+    },
+    async runNetworkAudit() {
+      await delay(350);
+      return { completedAt:new Date().toISOString(),reportAvailable:true,summary:{connections:2,suspicious:0,unsignedProcesses:0,truncated:false},windowsSecurity:{firewall:[{name:'Domain',enabled:true},{name:'Private',enabled:true},{name:'Public',enabled:true}],defender:{antivirusEnabled:true,realTimeProtectionEnabled:true,networkInspectionEnabled:true}},events:[{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'162.159.135.234',remotePort:443,domain:'discord.com',process:{id:4120,name:'Discord',path:'C:\\Usuarios\\Demo\\AppData\\Local\\Discord\\Discord.exe'},signature:{status:'valid',publisher:'Discord Inc.'}}]};
+    },
+    async exportNetworkReport({ format } = {}) {
+      if (!['json','csv'].includes(format)) throw new Error('Formato no válido.');
+      return {cancelled:false,format,count:2,label:`Aegis-Guard-red-preview.${format}`};
     },
     async isolateResult({ scanId, resultId } = {}) {
       if (!safeString(scanId) || !safeString(resultId)) throw new Error('Identificador no válido.');

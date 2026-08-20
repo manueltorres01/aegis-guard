@@ -65,6 +65,12 @@ async function dispatch(action, payload) {
       return { cancelled: Boolean(service.cancelScan()) };
     case WORKER_ACTIONS.listQuarantine:
       return service.listQuarantine();
+    case WORKER_ACTIONS.getLatestReport:
+      return service.getLatestReport(payload.format);
+    case WORKER_ACTIONS.runNetworkAudit:
+      return service.runNetworkAudit();
+    case WORKER_ACTIONS.getLatestNetworkReport:
+      return service.getLatestNetworkReport(payload.format);
     case WORKER_ACTIONS.isolateResult:
       return service.isolateResult(payload.scanId, payload.resultId);
     case WORKER_ACTIONS.restoreQuarantine:

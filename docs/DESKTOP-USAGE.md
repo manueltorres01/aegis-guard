@@ -5,6 +5,14 @@ application. Aegis is an experimental, on-demand second-opinion scanner. It
 does not replace Microsoft Defender, a supported endpoint security product or
 an incident-response process.
 
+## Network audit (0.2.3)
+
+The **Network** page takes a bounded, read-only snapshot of established or pending outbound TCP connections on Windows. It records the remote IP and port, correlates a domain only when the Windows DNS cache provides one, attributes the owning process, and records that executable's Authenticode publisher when accessible. It also reads the Windows Firewall profiles and Microsoft Defender status without changing either product.
+
+Events are compared with `definitions/network-indicators.json`. The bundled list is intentionally empty until Aegis has a signed, maintained intelligence-update channel; matching an administrator-supplied local indicator produces a suspicious audit event, not an automatic block. The latest capture is retained with native JSON and spreadsheet-safe CSV export, and the UI is capped at 500 events.
+
+This is endpoint visibility, not DDoS protection. A desktop application cannot absorb an upstream volumetric attack after the connection is saturated; that mitigation belongs at the router, ISP, hosting provider or scrubbing/CDN service.
+
 ## Protection for Downloads
 
 Every new desktop session starts a watcher for the Windows **Downloads**
@@ -79,9 +87,9 @@ are excluded from Quick scans are included.
 Deep scan traversal remains confined to the selected root. Symbolic links,
 Windows junctions and other reparse points are not followed, so they cannot
 redirect the scan to a sibling or unrelated location. The canonical quarantine
-vault and exactly registered staging files belonging to an active isolate or
-restore operation are excluded. Other files under Aegis's data directory are
-not broadly excluded. The legacy `custom` mode name is accepted for
+vault, the internal complete-report directory and exactly registered staging
+files belonging to an active isolate or restore operation are excluded. Other
+files under Aegis's data directory are not broadly excluded. The legacy `custom` mode name is accepted for
 compatibility but is normalized and reported as `deep`. Files are hashed in
 full and pattern matching preserves overlap between streaming chunks,
 including signatures that cross a chunk boundary.
@@ -131,16 +139,17 @@ partial summary and retained findings accumulated before cancellation. Pausing
 protection is a separate control and does not pause or cancel an on-demand
 scan.
 
-Detailed report storage is bounded by both 5,000 results that require
-attention and an estimated 8 MiB per report. When either bound is reached,
-retention priority is malicious, suspicious, file error, then skipped;
-lower-priority detail can be displaced so the most important findings remain
-reviewable. This limit does not stop filesystem traversal or analysis: summary
-counters and the `resultsTruncated` count still describe the complete run.
-Clean-file detail is not retained merely to create an enormous report. Manual
-isolation identifiers remain available for at most the four most recent scan
-jobs; an older result must be scanned again before it can be isolated through
-that identifier.
+The interactive Results table remains bounded by 5,000 attention results and
+an estimated 8 MiB per scan. Retention priority is malicious, suspicious, file
+error, then skipped, so the most important findings remain reviewable without
+an unbounded renderer payload. Separately, every scan streams all file results,
+including clean files, to complete JSON and spreadsheet-safe CSV reports under
+the application data directory. The Results view can copy either format to a
+user-selected destination through **Download report**; users do not need to
+browse internal application files. The internal report directory is excluded
+from scanning to prevent self-analysis. Manual isolation identifiers remain
+available for at most the four most recent scan jobs; an older result must be
+scanned again before it can be isolated through that identifier.
 
 ## Content and crash-recovery limits
 
@@ -176,6 +185,7 @@ visible warning while any warning count is nonzero.
 - Review suspicious heuristic findings before isolating them; legitimate tools
   can match scripting, entropy or macro heuristics.
 - Automatic quarantine is off by default. Quarantine is encrypted and
-  authenticated, and restore refuses to overwrite an existing destination.
+  authenticated. Restore returns to the authenticated original path without a
+  destination picker and refuses to overwrite an existing file.
 - If compromise is plausible, follow [INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md)
   rather than relying on a single Aegis result.

@@ -8,6 +8,9 @@ export const IPC_CHANNELS = Object.freeze({
   listQuarantine: 'aegis:quarantine:list',
   quarantineIsolate: 'aegis:quarantine:isolate',
   restoreQuarantine: 'aegis:quarantine:restore',
+  exportReport: 'aegis:report:export',
+  runNetworkAudit: 'aegis:network:audit',
+  exportNetworkReport: 'aegis:network:export',
   startMonitor: 'aegis:monitor:start',
   stopMonitor: 'aegis:monitor:stop',
   pauseProtection: 'aegis:protection:pause',
@@ -30,6 +33,9 @@ export const WORKER_ACTIONS = Object.freeze({
   listQuarantine: 'quarantine.list',
   isolateResult: 'quarantine.isolate',
   restoreQuarantine: 'quarantine.restore',
+  getLatestReport: 'report.latest',
+  runNetworkAudit: 'network.audit',
+  getLatestNetworkReport: 'network.report.latest',
   startMonitor: 'monitor.start',
   stopMonitor: 'monitor.stop',
   pauseProtection: 'protection.pause',
@@ -96,6 +102,13 @@ export function parseRestore(value) {
   const input = assertPlainObject(value, 'restore request');
   assertOnlyKeys(input, ['id']);
   return { id: parseOpaqueId(input.id, 'quarantine identifier') };
+}
+
+export function parseExportReport(value) {
+  const input = assertPlainObject(value, 'report export request');
+  assertOnlyKeys(input, ['format']);
+  if (!['json', 'csv'].includes(input.format)) throw new ContractError('Unknown report format');
+  return { format: input.format };
 }
 
 export function parseIsolateResult(value) {
@@ -169,8 +182,21 @@ export function parseWorkerActionPayload(action, value) {
     case WORKER_ACTIONS.pauseProtection:
     case WORKER_ACTIONS.resumeProtection:
     case WORKER_ACTIONS.createAndScanSimulation:
+    case WORKER_ACTIONS.runNetworkAudit:
     case WORKER_ACTIONS.shutdown:
       return assertEmptyObjectOrUndefined(value);
+    case WORKER_ACTIONS.getLatestReport: {
+      const input = assertPlainObject(value, 'latest report request');
+      assertOnlyKeys(input, ['format']);
+      if (!['json', 'csv'].includes(input.format)) throw new ContractError('Unknown report format');
+      return { format: input.format };
+    }
+    case WORKER_ACTIONS.getLatestNetworkReport: {
+      const input = assertPlainObject(value, 'latest network report request');
+      assertOnlyKeys(input, ['format']);
+      if (!['json', 'csv'].includes(input.format)) throw new ContractError('Unknown network report format');
+      return { format: input.format };
+    }
     case WORKER_ACTIONS.startScan: {
       const input = assertPlainObject(value, 'worker scan request');
       assertOnlyKeys(input, ['mode', 'target', 'autoQuarantine']);

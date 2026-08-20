@@ -40,6 +40,7 @@ export class ScanEngine {
     excludePaths = [],
     trustVerifier = null,
     trustedPublisherOrganizations = [],
+    trustedApplicationPolicies = [],
     isTransientPath = () => false
   }) {
     if (typeof isTransientPath !== 'function') throw new TypeError('isTransientPath must be a function');
@@ -51,6 +52,7 @@ export class ScanEngine {
     this.isTransientPath = isTransientPath;
     this.trustVerifier = typeof trustVerifier === 'function' ? trustVerifier : null;
     this.trustedPublisherOrganizations = new Set(trustedPublisherOrganizations.map(normalizePublisher));
+    this.trustedApplicationPolicies = normalizeApplicationPolicies(trustedApplicationPolicies);
     this.patternRules = (definitions.patterns ?? []).map(rule => ({
       ...rule,
       bytes: rule.literalBase64
@@ -173,7 +175,7 @@ export class ScanEngine {
         addFinding(result, 'heuristic.entropy', 'Unusually high entropy; file may be packed or encrypted', 18);
       }
       if (peLike && this.trustVerifier && heuristicScore(result) >= 25) {
-        await applyAuthenticodeTrust(result, file, this.trustVerifier, this.trustedPublisherOrganizations);
+        await applyAuthenticodeTrust(result, file, this.trustVerifier, this.trustedPublisherOrganizations, this.trustedApplicationPolicies);
       }
       return finalizeResult(result, started, this.definitions, this.threshold);
     } finally {
@@ -487,7 +489,7 @@ function heuristicScore(result) {
   return result.findings.reduce((sum, finding) => sum + Math.max(0, finding.score), 0);
 }
 
-async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizations) {
+async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizations, trustedApplications) {
   try {
     const trust = await verifier(file, result.sha256);
     if (!trust || typeof trust !== 'object') return;
@@ -501,7 +503,12 @@ async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizatio
     const lowConfidenceOnly = result.findings.every(finding =>
       finding.id === 'heuristic.entropy' || finding.id === 'heuristic.pe-api-combination'
     );
-    const trustedSigner = result.trust.isOsBinary || trustedOrganizations.has(organization);
+    const trustedApplication = trustedApplications.some(policy =>
+      policy.publisher === organization && policy.roots.some(root => isPathWithin(root, file))
+    );
+    const trustedSigner = result.trust.isOsBinary || trustedOrganizations.has(organization) || trustedApplication;
+    result.trust.applicationVerified = trustedApplication;
+    result.trust.trustedPublisher = result.trust.status === 'valid' && trustedSigner;
     if (result.trust.status === 'valid' && trustedSigner && lowConfidenceOnly) {
       const discount = heuristicScore(result);
       const publisher = result.trust.organization || (result.trust.isOsBinary ? 'Microsoft Windows OS binary' : 'trusted publisher');
@@ -515,6 +522,23 @@ async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizatio
 
 function normalizePublisher(value) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function normalizeApplicationPolicies(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(policy => ({
+    publisher: normalizePublisher(policy?.publisher),
+    roots: Array.isArray(policy?.roots) ? policy.roots.map(expandEnvironmentPath).filter(Boolean) : []
+  })).filter(policy => policy.publisher && policy.roots.length);
+}
+
+function expandEnvironmentPath(value) {
+  if (typeof value !== 'string' || !value) return null;
+  const expanded = value.replace(/%([^%]+)%/g, (_match, name) => {
+    const key = Object.keys(process.env).find(candidate => candidate.toLowerCase() === name.toLowerCase());
+    return key ? process.env[key] : '';
+  });
+  return path.isAbsolute(expanded) ? path.resolve(expanded) : null;
 }
 
 function elapsed(started) {

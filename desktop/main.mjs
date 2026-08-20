@@ -21,6 +21,7 @@ import {
   WORKER_PROTOCOL_VERSION,
   assertNoPayload,
   parseChooseTarget,
+  parseExportReport,
   parseIsolateResult,
   parseMonitorStart,
   parseRestore,
@@ -501,6 +502,11 @@ function registerIpcHandlers() {
   });
 
   registerHandler(IPC_CHANNELS.restoreQuarantine, parseRestore, request => restoreQuarantine(request.id));
+  registerHandler(IPC_CHANNELS.exportReport, parseExportReport, request => exportLatestReport(request.format));
+  registerHandler(IPC_CHANNELS.runNetworkAudit, assertNoPayload, async () => sanitizeNetworkReport(
+    await engine.request(WORKER_ACTIONS.runNetworkAudit, undefined, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.exportNetworkReport, parseExportReport, request => exportLatestNetworkReport(request.format));
 
   registerHandler(IPC_CHANNELS.startMonitor, parseMonitorStart, async request => {
     const context = await targetVault.consume(request.targetId);
@@ -624,25 +630,51 @@ async function restoreQuarantine(id) {
   const metadata = items.find(item => item?.id === id);
   if (!metadata) throw operationError('QUARANTINE_NOT_FOUND', 'El elemento ya no está en cuarentena.');
 
-  const fallbackName = safeLabel(path.basename(String(metadata.originalPath ?? 'archivo-restaurado')) || 'archivo-restaurado');
-  const originalPath = typeof metadata.originalPath === 'string' && path.isAbsolute(metadata.originalPath)
-    ? path.resolve(metadata.originalPath)
-    : path.join(app.getPath('downloads'), fallbackName);
-  const selected = await dialog.showSaveDialog(mainWindow, {
-    title: 'Restaurar archivo en…',
-    defaultPath: originalPath,
-    buttonLabel: 'Restaurar',
-    properties: ['showOverwriteConfirmation', 'dontAddToRecent']
-  });
-  if (selected.canceled || !selected.filePath) return { cancelled: true };
-
-  const destination = path.resolve(selected.filePath);
+  if (typeof metadata.originalPath !== 'string' || !path.isAbsolute(metadata.originalPath)) {
+    throw operationError('INVALID_ORIGINAL_PATH', 'La cuarentena no conserva una ruta original válida.');
+  }
+  const destination = path.resolve(metadata.originalPath);
   activeMutationCount++;
   let result;
   try { result = await engine.request(WORKER_ACTIONS.restoreQuarantine, { id, destination }); }
   finally { activeMutationCount--; }
   const label = safeLabel(path.basename(String(result ?? destination)));
   return { cancelled: false, restored: true, id, name: label, label };
+}
+
+async function exportLatestReport(format) {
+  const report = await engine.request(WORKER_ACTIONS.getLatestReport, { format });
+  const reportsRoot = path.resolve(app.getPath('userData'), 'reports');
+  const source = path.resolve(String(report?.path ?? ''));
+  const relative = path.relative(reportsRoot, source);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw operationError('INVALID_REPORT_PATH', 'La ruta interna del informe no es válida.');
+  }
+  const date = String(report.completedAt ?? new Date().toISOString()).slice(0, 10);
+  const selected = await dialog.showSaveDialog(mainWindow, {
+    title: 'Descargar informe completo',
+    defaultPath: path.join(app.getPath('downloads'), `Aegis-Guard-informe-${date}.${format}`),
+    buttonLabel: 'Guardar informe',
+    filters: [{ name: format === 'json' ? 'Informe JSON' : 'Informe CSV', extensions: [format] }],
+    properties: ['showOverwriteConfirmation', 'dontAddToRecent']
+  });
+  if (selected.canceled || !selected.filePath) return { cancelled: true };
+  const destination = path.resolve(selected.filePath);
+  await fs.copyFile(source, destination);
+  return { cancelled: false, format, count: safeCount(report.count), label: safeLabel(path.basename(destination)) };
+}
+
+async function exportLatestNetworkReport(format) {
+  const report = await engine.request(WORKER_ACTIONS.getLatestNetworkReport, { format });
+  const reportsRoot = path.resolve(app.getPath('userData'), 'reports');
+  const source = path.resolve(String(report?.path ?? ''));
+  const relative = path.relative(reportsRoot, source);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw operationError('INVALID_REPORT_PATH', 'La ruta interna del informe de red no es válida.');
+  const date = String(report.completedAt ?? new Date().toISOString()).slice(0, 10);
+  const selected = await dialog.showSaveDialog(mainWindow, { title:'Descargar auditoría de red', defaultPath:path.join(app.getPath('downloads'),`Aegis-Guard-red-${date}.${format}`), buttonLabel:'Guardar informe', filters:[{name:format==='json'?'Informe JSON':'Informe CSV',extensions:[format]}], properties:['showOverwriteConfirmation','dontAddToRecent'] });
+  if (selected.canceled || !selected.filePath) return { cancelled:true };
+  await fs.copyFile(source, path.resolve(selected.filePath));
+  return { cancelled:false, format, count:safeCount(report.count), label:safeLabel(path.basename(selected.filePath)) };
 }
 
 function publishEvent(event) {
@@ -829,6 +861,8 @@ function sanitizeBootstrap(value) {
     lastSummary,
     lastScan: lastSummary ? { completedAt: lastScanAt, summary: lastSummary } : null,
     totalScanned: lastSummary?.scanned ?? 0,
+    reportAvailable: Boolean(input.reportAvailable),
+    network: input.network ? sanitizeNetworkReport(input.network) : null,
     activity: Array.isArray(input.activity) ? input.activity.slice(0, 100).map(sanitizeActivity) : [],
     quarantine,
     quarantineCount: quarantineInventory.total,
@@ -849,6 +883,18 @@ function sanitizeBootstrap(value) {
   };
 }
 
+function sanitizeNetworkReport(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const events = Array.isArray(input.events) ? input.events.slice(0, 500).map(item => ({
+    verdict: item?.verdict === 'suspicious' ? 'suspicious' : 'observed',
+    explanation: safeText(item?.explanation, 500), protocol: safeLabel(item?.protocol),
+    remoteAddress: safeText(item?.remoteAddress, 128), remotePort: safeCount(item?.remotePort), domain: safeText(item?.domain, 253),
+    process: { id:safeCount(item?.process?.id), name:safeText(item?.process?.name,260), path:safeText(item?.process?.path,1000) },
+    signature: { status:item?.signature?.status==='valid'?'valid':'unverified', publisher:safeText(item?.signature?.publisher,300) }
+  })) : [];
+  return { completedAt:safeDate(input.completedAt), reportAvailable:Boolean(input.reportAvailable), summary:{connections:safeCount(input.summary?.connections),suspicious:safeCount(input.summary?.suspicious),unsignedProcesses:safeCount(input.summary?.unsignedProcesses),truncated:Boolean(input.summary?.truncated)}, windowsSecurity:{firewall:Array.isArray(input.windowsSecurity?.firewall)?input.windowsSecurity.firewall.slice(0,8).map(x=>({name:safeLabel(x?.name),enabled:Boolean(x?.enabled),defaultInboundAction:safeLabel(x?.defaultInboundAction),defaultOutboundAction:safeLabel(x?.defaultOutboundAction)})):[],defender:input.windowsSecurity?.defender?{antivirusEnabled:Boolean(input.windowsSecurity.defender.antivirusEnabled),realTimeProtectionEnabled:Boolean(input.windowsSecurity.defender.realTimeProtectionEnabled),networkInspectionEnabled:Boolean(input.windowsSecurity.defender.networkInspectionEnabled)}:null}, events };
+}
+
 function sanitizeScanReport(value, context) {
   const input = value && typeof value === 'object' ? value : {};
   const scanId = safeUuid(input.scanId);
@@ -863,7 +909,8 @@ function sanitizeScanReport(value, context) {
     results: Array.isArray(input.results)
       ? input.results.map(item => ({ ...sanitizeScanResult(item, context), scanId }))
       : [],
-    resultsTruncated: safeCount(input.resultsTruncated)
+    resultsTruncated: safeCount(input.resultsTruncated),
+    reportAvailable: Boolean(input.reportAvailable)
   };
 }
 
@@ -886,7 +933,15 @@ function sanitizeScanResult(value, context) {
     durationMs: safeCount(input.durationMs),
     error: input.error ? 'No se pudo leer este archivo.' : undefined,
     action: ['quarantined', 'quarantine-error'].includes(input.action) ? input.action : undefined,
-    quarantineId: input.quarantineId ? safeUuid(input.quarantineId) : undefined
+    quarantineId: input.quarantineId ? safeUuid(input.quarantineId) : undefined,
+    trust: input.trust && typeof input.trust === 'object' ? {
+      status: safeLabel(input.trust.status),
+      subject: safeText(input.trust.subject, 500),
+      organization: safeText(input.trust.organization, 200),
+      isOsBinary: Boolean(input.trust.isOsBinary),
+      trustedPublisher: Boolean(input.trust.trustedPublisher),
+      applicationVerified: Boolean(input.trust.applicationVerified)
+    } : undefined
   };
 }
 

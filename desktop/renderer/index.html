@@ -51,6 +51,9 @@
         <button class="nav-item" type="button" data-view="protection">
           <svg aria-hidden="true"><use href="#i-radar"/></svg><span>Protección</span>
         </button>
+        <button class="nav-item" type="button" data-view="network">
+          <svg aria-hidden="true"><use href="#i-radar"/></svg><span>Red</span>
+        </button>
         <button class="nav-item" type="button" data-view="results">
           <svg aria-hidden="true"><use href="#i-results"/></svg><span>Resultados</span>
           <span class="nav-badge" id="results-badge" hidden>0</span>
@@ -265,12 +268,34 @@
           </div>
         </section>
 
+        <section class="view" id="view-network" data-title="Red" data-eyebrow="Auditoría local" aria-labelledby="network-heading" hidden>
+          <div class="section-heading page-heading table-heading">
+            <div><h2 id="network-heading">Visibilidad de red</h2><p id="network-summary">Realiza una captura para atribuir conexiones salientes a sus procesos.</p></div>
+            <div class="button-row"><button class="button primary" id="run-network-audit" type="button">Auditar ahora</button><button class="button secondary" id="export-network-json" type="button" disabled>JSON</button><button class="button secondary" id="export-network-csv" type="button" disabled>CSV</button></div>
+          </div>
+          <aside class="info-banner"><svg aria-hidden="true"><use href="#i-info"/></svg><p><strong>Modo auditoría.</strong> Aegis observa y explica conexiones, pero no bloquea tráfico ni sustituye el Firewall de Windows. La mitigación DDoS volumétrica corresponde al router, ISP o proveedor de infraestructura.</p></aside>
+          <div class="fact-grid">
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-shield"/></svg><div><strong id="network-firewall-state">Firewall sin comprobar</strong><p>Perfiles de Firewall de Windows activos.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-shield"/></svg><div><strong id="network-defender-state">Defender sin comprobar</strong><p>Antivirus y protección en tiempo real.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-results"/></svg><div><strong id="network-event-count">0 conexiones</strong><p id="network-alert-count">0 coincidencias con indicadores.</p></div></article>
+          </div>
+          <article class="card data-card"><div class="table-scroll"><table><thead><tr><th>Estado</th><th>Destino</th><th>Proceso</th><th>Firma</th><th>Explicación</th></tr></thead><tbody id="network-body"></tbody></table></div><div class="table-empty" id="network-empty"><span class="empty-icon"><svg aria-hidden="true"><use href="#i-radar"/></svg></span><h3>Sin captura de red</h3><p>Pulsa «Auditar ahora» para tomar una instantánea local.</p></div></article>
+        </section>
+
         <section class="view" id="view-results" data-title="Resultados" data-eyebrow="Historial de análisis" aria-labelledby="results-heading" hidden>
           <div class="section-heading page-heading table-heading">
             <div><h2 id="results-heading">Resultados</h2><p id="results-summary">Todavía no hay análisis registrados.</p></div>
-            <div class="filter-group" aria-label="Filtrar resultados">
-              <button class="filter-button is-selected" type="button" data-filter="all" aria-pressed="true">Todos</button>
-              <button class="filter-button" type="button" data-filter="attention" aria-pressed="false">Requieren atención</button>
+            <div class="results-controls">
+              <div class="filter-group" aria-label="Filtrar resultados">
+                <button class="filter-button is-selected" type="button" data-filter="all" aria-pressed="true">Todo</button>
+                <button class="filter-button" type="button" data-filter="suspicious" aria-pressed="false">Sospechoso</button>
+                <button class="filter-button" type="button" data-filter="not-scanned" aria-pressed="false">No analizado</button>
+                <button class="filter-button" type="button" data-filter="malicious" aria-pressed="false">Malicioso</button>
+              </div>
+              <div class="button-row compact-row">
+                <button class="button secondary compact" id="export-report-json" type="button">Descargar JSON</button>
+                <button class="button secondary compact" id="export-report-csv" type="button">Descargar CSV</button>
+              </div>
             </div>
           </div>
           <article class="card data-card">
@@ -296,7 +321,7 @@
           </div>
           <aside class="info-banner warning-soft">
             <svg aria-hidden="true"><use href="#i-info"/></svg>
-            <p>Restaurar devuelve el archivo a una ubicación que tú elijas. Hazlo solo si confías en él.</p>
+            <p>Restaurar devuelve el archivo a su ubicación original. Hazlo solo si confías en él.</p>
           </aside>
           <aside class="info-banner warning-soft" id="quarantine-inventory-warning" role="status" hidden>
             <svg aria-hidden="true"><use href="#i-alert"/></svg>
@@ -388,10 +413,10 @@
   <dialog id="restore-dialog" aria-labelledby="restore-dialog-title">
     <div class="dialog-icon"><svg aria-hidden="true"><use href="#i-vault"/></svg></div>
     <h2 id="restore-dialog-title">¿Restaurar este archivo?</h2>
-    <p id="restore-dialog-copy">Elige una ubicación segura y analiza el archivo con Microsoft Defender antes de abrirlo.</p>
+    <p id="restore-dialog-copy">Se devolverá a su ubicación original. Aegis no sobrescribirá otro archivo que ya exista allí.</p>
     <div class="dialog-actions">
       <button class="button secondary" id="restore-cancel" type="button">Cancelar</button>
-      <button class="button primary" id="restore-confirm" type="button">Elegir ubicación y restaurar</button>
+      <button class="button primary" id="restore-confirm" type="button">Restaurar en ubicación original</button>
     </div>
   </dialog>
 

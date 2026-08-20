@@ -65,7 +65,7 @@ Desktop quarantine, settings and activity live under the per-user application-da
 
 Each desktop session starts with protection for the Windows **Downloads** folder active. Browser partial files ending in `.crdownload` or `.part` are ignored until they receive their final name; stable `.tmp`, `.partial` and `.download` files are not excluded merely by suffix. Once eligible, a watched regular file is read exhaustively in chunks without Quick scan's 128 MiB cap. Pausing protection also pauses any manually selected folder monitor, but does not cancel a scan that is already running; the pause is deliberately session-only and protection starts active again after relaunch. **Launch at startup** is applied only by the packaged application, not by the development shell or UI preview.
 
-Desktop scan modes have deliberately different scope: **Quick** scans regular files only at the top level of Downloads, **Deep** recursively scans one natively selected file or folder, and **Full** streams accessible regular files on the ready, local lettered drives Windows enumerates. Deep and Full include hidden items and do not impose a file-count or file-size cutoff, but they never follow symbolic links, junctions or other reparse points. Only the quarantine vault and exactly registered active staging files are excluded; unrelated files under Aegis's data directory remain in scope. Full scans can take a long time; Windows may deny protected paths, which are counted separately while accessible content continues. If Windows cannot enumerate the drive set, Full fails explicitly and never silently degrades to scanning only `C:`. See [docs/DESKTOP-USAGE.md](docs/DESKTOP-USAGE.md) for exact behavior and reporting limits.
+Desktop scan modes have deliberately different scope: **Quick** scans regular files only at the top level of Downloads, **Deep** recursively scans one natively selected file or folder, and **Full** streams accessible regular files on the ready, local lettered drives Windows enumerates. Deep and Full include hidden items and do not impose a file-count or file-size cutoff, but they never follow symbolic links, junctions or other reparse points. The quarantine vault, complete-report store and exactly registered active staging files are excluded; unrelated files under Aegis's data directory remain in scope. Full scans can take a long time; Windows may deny protected paths, which are counted separately while accessible content continues. If Windows cannot enumerate the drive set, Full fails explicitly and never silently degrades to scanning only `C:`. See [docs/DESKTOP-USAGE.md](docs/DESKTOP-USAGE.md) for exact behavior and reporting limits.
 
 ## Usage
 
@@ -147,14 +147,7 @@ Aegis does not yet include a signed Windows minifilter driver, background Window
 
 ## Roadmap
 
-1. Export complete scan reports from **Results** to JSON and CSV, preserving paths, verdicts, scores, findings, actions, timestamps and scan summary
-2. Add **Results** filters for malicious, suspicious, file-analysis errors and skipped files, in addition to the existing overview
-3. Make **Restore** return quarantined files directly to their recorded original path without opening a destination picker, while retaining no-overwrite and path-safety protections
-4. Signed and rollback-safe definition updates
-5. PE parsing, Authenticode checks, archive scanning and YARA-compatible rules
-6. Least-privilege Windows service with AMSI/ETW integration
-7. Privacy-preserving reputation and behavioral correlation
-8. Corpus evaluation, fuzzing, external audit and reproducible signed releases
+Version 0.2.3 includes every 0.2.2 improvement and adds a bounded, read-only Windows network audit: outbound TCP destination/process attribution, Authenticode publisher evidence, local domain/IP indicator matching, DNS-cache correlation, Firewall/Defender state and native JSON/CSV export. It neither blocks traffic nor claims volumetric-DDoS mitigation. The ordered security and commercialization plan through 1.0.0 is maintained in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Security and contributing
 

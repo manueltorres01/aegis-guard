@@ -259,9 +259,9 @@ test('full scan aggregates only injected temporary roots and traversal failures'
   assert.equal(report.summary.errors, 0);
   assert.equal(report.summary.traversalErrors, 1);
   assert.equal(report.summary.quarantined, 0);
-  assert.equal(report.results.length, 1);
-  assert.equal(report.results[0].path, simulation);
-  assert.equal(report.results[0].verdict, 'malicious');
+  assert.equal(report.results.length, 2);
+  assert.ok(report.results.some(result => result.path === simulation && result.verdict === 'malicious'));
+  assert.ok(report.results.some(result => result.verdict === 'error' && result.detailType === 'traversal-error'));
   assert.equal(report.results.some(result => result.path === excludedSimulation), false);
   assert.ok(events.some(event => event.type === 'scan-traversal-error'));
   assert.ok(events.some(event =>

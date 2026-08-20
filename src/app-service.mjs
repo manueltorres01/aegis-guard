@@ -7,6 +7,8 @@ import { createHarmlessSimulation } from './simulator.mjs';
 import { WatchService } from './watch-service.mjs';
 import { discoverWindowsDriveRoots } from './drive-roots.mjs';
 import { createAuthenticodeVerifier } from './authenticode.mjs';
+import { ScanReportWriter } from './report-writer.mjs';
+import { NetworkAuditor, writeNetworkReport } from './network-audit.mjs';
 import { loadJson, pathExists } from './util.mjs';
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -52,10 +54,13 @@ export class AppService {
     await fsp.mkdir(this.dataDirectory, { recursive: true });
     this.config = await loadJson(path.join(this.baseDirectory, 'config', 'default.json'));
     this.definitions = await loadJson(path.join(this.baseDirectory, 'definitions', 'signatures.json'));
+    this.networkIndicators = await loadJson(path.join(this.baseDirectory, 'definitions', 'network-indicators.json'));
     const packageInfo = await loadJson(path.join(this.baseDirectory, 'package.json'));
     this.version = packageInfo.version;
     this.settingsFile = path.join(this.dataDirectory, 'settings.json');
     this.stateFile = path.join(this.dataDirectory, 'state.json');
+    this.reportsDirectory = path.join(this.dataDirectory, 'reports');
+    this.networkAuditor = new NetworkAuditor({ indicators: this.networkIndicators });
     this.settings = sanitizeSettings(await readJsonOr(this.settingsFile, DEFAULT_SETTINGS));
     this.state = sanitizeState(await readJsonOr(this.stateFile, {}));
     const quarantineDirectory = path.join(this.dataDirectory, 'quarantine');
@@ -68,7 +73,7 @@ export class AppService {
       ...this.config,
       definitions: this.definitions,
       trustVerifier: createAuthenticodeVerifier(),
-      excludePaths: [canonicalQuarantineDirectory, quarantineDirectory],
+      excludePaths: [canonicalQuarantineDirectory, quarantineDirectory, this.reportsDirectory],
       isTransientPath: candidate => this.quarantine.isTransientPath(candidate)
     });
     this.watchService = new WatchService({
@@ -102,6 +107,8 @@ export class AppService {
       lastScanAt: this.state.lastScanAt,
       lastSummary: this.state.lastSummary,
       activity: this.state.activity.slice(0, 30),
+      reportAvailable: Boolean(await Promise.all([this.getLatestReport('json'), this.getLatestReport('csv')]).catch(() => null)),
+      network: this.state.latestNetworkReport?.summary ? { ...this.state.latestNetworkReport, reportAvailable: true } : null,
       quarantine: quarantineInventory.items,
       quarantineCount: quarantineInventory.total,
       quarantineInventory: {
@@ -187,6 +194,8 @@ export class AppService {
     const controller = new AbortController();
     const scanId = crypto.randomUUID();
     const startedAt = Date.now();
+    const previousReport = this.state.latestReport;
+    const reportWriter = await new ScanReportWriter({ directory: this.reportsDirectory, scanId, mode, target, startedAt }).init();
     const resultMap = new Map();
     const retainedResults = [];
     const retentionState = createRetentionState(retainedResults, resultMap);
@@ -243,6 +252,15 @@ export class AppService {
           signal: controller.signal,
           onTraversalError: error => {
             summary.traversalErrors++;
+            const result = {
+              path: error.path,
+              verdict: 'error', score: 0, findings: [],
+              error: error.error || 'Path could not be accessed',
+              detailType: 'traversal-error'
+            };
+            const retention = retainAttentionResult(result, retentionState);
+            resultsTruncated += retention.truncated;
+            void reportWriter.append(result);
             if (summary.traversalErrors <= MAX_TRAVERSAL_EVENTS) {
               this.emitEvent('scan-traversal-error', { scanId, mode, currentRoot: root, ...error });
             }
@@ -250,6 +268,15 @@ export class AppService {
           onTraversalSkip: detail => {
             summary.traversalSkipped++;
             if (detail.reason === 'link' || detail.reason === 'outside-root') summary.linksSkipped++;
+            const result = {
+              path: detail.path,
+              verdict: 'skipped', score: 0,
+              findings: [{ id: `traversal.${detail.reason || 'skipped'}`, description: `Not scanned: ${detail.reason || 'safe traversal policy'}`, score: 0 }],
+              detailType: 'traversal-skip'
+            };
+            const retention = retainAttentionResult(result, retentionState);
+            resultsTruncated += retention.truncated;
+            void reportWriter.append(result);
             if (summary.traversalSkipped <= MAX_TRAVERSAL_EVENTS) {
               this.emitEvent('scan-traversal-skipped', { scanId, mode, currentRoot: root, ...detail });
             }
@@ -280,6 +307,8 @@ export class AppService {
                 result.actionError = String(error.message ?? '').slice(0, 1_000);
               }
             }
+
+            await reportWriter.append(result);
 
             if (retention.retained) this.emitEvent('scan-detection', { scanId, mode, result });
           },
@@ -332,6 +361,13 @@ export class AppService {
         results: compactRetainedResults(retentionState),
         resultsTruncated
       };
+      const fullReport = await reportWriter.finalize({ completedAt, summary, resultsTruncated });
+      report.reportAvailable = Boolean(fullReport);
+      if (fullReport) {
+        this.state.latestReport = fullReport;
+        await this.removeReportFiles(previousReport);
+      }
+      else this.emitEvent('scan-warning', { scanId, mode, code: 'REPORT_NOT_PERSISTED', message: 'The full scan report could not be saved' });
       job.report = report;
       try { await this.persistState(); }
       catch {
@@ -367,15 +403,24 @@ export class AppService {
     } catch (error) {
       summary.durationMs = Date.now() - startedAt;
       if (error.name === 'AbortError') {
+        const completedAt = new Date().toISOString();
         const report = {
-          scanId, mode, path: target, cancelled: true, summary,
+          scanId, mode, path: target, completedAt, cancelled: true, summary,
           results: compactRetainedResults(retentionState),
           resultsTruncated
         };
+        const fullReport = await reportWriter.finalize({ completedAt, cancelled: true, summary, resultsTruncated });
+        report.reportAvailable = Boolean(fullReport);
+        if (fullReport) {
+          this.state.latestReport = fullReport;
+          await this.removeReportFiles(previousReport);
+        }
+        if (fullReport) await this.persistStateBestEffort('cancelled-scan-report');
         job.report = report;
         this.emitEvent('scan-cancelled', report);
         return report;
       }
+      await reportWriter.abort();
       this.emitEvent('scan-error', { scanId, mode, path: target, message: error.message });
       throw error;
     } finally {
@@ -403,6 +448,52 @@ export class AppService {
   }
 
   async listQuarantine() { return this.quarantine.list(); }
+
+  async getLatestReport(format) {
+    if (!['json', 'csv'].includes(format)) throw new Error('Unknown report format');
+    const report = this.state.latestReport;
+    const fileName = format === 'json' ? report?.jsonFile : report?.csvFile;
+    if (typeof fileName !== 'string' || path.basename(fileName) !== fileName) throw new Error('No complete report is available');
+    const reportPath = path.join(this.reportsDirectory, fileName);
+    if (!await pathExists(reportPath)) throw new Error('The complete report is no longer available');
+    return { path: reportPath, format, completedAt: report.completedAt, count: report.count };
+  }
+
+  async runNetworkAudit() {
+    const previous = this.state.latestNetworkReport;
+    const report = await this.networkAuditor.audit();
+    const files = await writeNetworkReport(this.reportsDirectory, report);
+    this.state.latestNetworkReport = {
+      completedAt: report.completedAt,
+      summary: report.summary,
+      windowsSecurity: report.windowsSecurity,
+      events: report.events.slice(0, 500),
+      jsonFile: path.basename(files.json),
+      csvFile: path.basename(files.csv)
+    };
+    this.addActivity({ type: 'network-audit', at: report.completedAt, summary: report.summary });
+    await this.persistStateBestEffort('network-audit');
+    if (previous) await this.removeReportFiles(previous);
+    return { ...report, reportAvailable: true };
+  }
+
+  async getLatestNetworkReport(format) {
+    if (!['json', 'csv'].includes(format)) throw new Error('Unknown network report format');
+    const report = this.state.latestNetworkReport;
+    const fileName = format === 'json' ? report?.jsonFile : report?.csvFile;
+    if (typeof fileName !== 'string' || path.basename(fileName) !== fileName) throw new Error('No network report is available');
+    const reportPath = path.join(this.reportsDirectory, fileName);
+    if (!await pathExists(reportPath)) throw new Error('The network report is no longer available');
+    return { path: reportPath, format, completedAt: report.completedAt, count: report.summary?.connections ?? 0 };
+  }
+
+  async removeReportFiles(report) {
+    if (!report || typeof report !== 'object') return;
+    const names = [report.jsonFile, report.csvFile].filter(name =>
+      typeof name === 'string' && path.basename(name) === name
+    );
+    await Promise.allSettled(names.map(name => fsp.rm(path.join(this.reportsDirectory, name), { force: true })));
+  }
 
   async restoreQuarantine(id, destination) {
     if (!isUuid(id)) throw new Error('Invalid quarantine identifier');
@@ -609,7 +700,33 @@ function sanitizeState(input = {}) {
   return {
     lastScanAt: typeof input.lastScanAt === 'string' ? input.lastScanAt : null,
     lastSummary: input.lastSummary && typeof input.lastSummary === 'object' ? input.lastSummary : null,
-    activity: Array.isArray(input.activity) ? input.activity.slice(0, 100) : []
+    activity: Array.isArray(input.activity) ? input.activity.slice(0, 100) : [],
+    latestReport: sanitizeLatestReport(input.latestReport),
+    latestNetworkReport: sanitizeNetworkReport(input.latestNetworkReport)
+  };
+}
+
+function sanitizeNetworkReport(value) {
+  const files = sanitizeLatestReport(value);
+  if (!files) return null;
+  return {
+    ...files,
+    summary: value.summary && typeof value.summary === 'object' ? value.summary : {},
+    windowsSecurity: value.windowsSecurity && typeof value.windowsSecurity === 'object' ? value.windowsSecurity : {},
+    events: Array.isArray(value.events) ? value.events.slice(0, 500) : []
+  };
+}
+
+function sanitizeLatestReport(value) {
+  if (!value || typeof value !== 'object') return null;
+  const jsonFile = typeof value.jsonFile === 'string' && path.basename(value.jsonFile) === value.jsonFile ? value.jsonFile : null;
+  const csvFile = typeof value.csvFile === 'string' && path.basename(value.csvFile) === value.csvFile ? value.csvFile : null;
+  if (!jsonFile || !csvFile) return null;
+  return {
+    scanId: typeof value.scanId === 'string' ? value.scanId : '',
+    completedAt: typeof value.completedAt === 'string' ? value.completedAt : null,
+    count: Number.isSafeInteger(value.count) && value.count >= 0 ? value.count : 0,
+    jsonFile, csvFile
   };
 }
 

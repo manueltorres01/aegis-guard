@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   ContractError,
   WORKER_ACTIONS,
+  parseExportReport,
   parseIsolateResult,
   parseMonitorStart,
   parseSettings,
@@ -76,6 +77,13 @@ test('settings contract accepts only a boolean launchAtStartup value', () => {
   assert.deepEqual(parseSettings({ launchAtStartup: true }), { launchAtStartup: true });
   assert.deepEqual(parseSettings({ launchAtStartup: false }), { launchAtStartup: false });
   assert.throws(() => parseSettings({ launchAtStartup: 'true' }), ContractError);
+});
+
+test('report export contracts accept only JSON and CSV', () => {
+  assert.deepEqual(parseExportReport({ format: 'json' }), { format: 'json' });
+  assert.deepEqual(parseWorkerActionPayload(WORKER_ACTIONS.getLatestReport, { format: 'csv' }), { format: 'csv' });
+  assert.throws(() => parseExportReport({ format: 'html' }), ContractError);
+  assert.throws(() => parseExportReport({ format: 'json', path: 'C:\\outside.json' }), ContractError);
 });
 
 test('monitor and manual quarantine contracts require strict opaque identifiers', () => {
