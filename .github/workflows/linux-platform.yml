@@ -1,0 +1,30 @@
+name: Linux platform preview
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-platform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run ci
+      - name: Verify Linux capability report
+        shell: bash
+        run: |
+          npm run platform:linux > linux-platform.json
+          node --input-type=module -e "const report = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile('linux-platform.json', 'utf8'))); if (!report.available || report.source !== 'linux-userspace' || report.capabilities.enforcement) process.exit(1); console.log(report.distribution?.pretty_name || report.profile.mode);"

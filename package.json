@@ -1,6 +1,6 @@
 {
   "name": "aegis-guard",
-  "version": "0.11.0",
+  "version": "0.13.0",
   "private": true,
   "description": "Auditable Windows malware scanner with a secure desktop interface and encrypted quarantine",
   "type": "module",
@@ -19,12 +19,14 @@
     "release:readiness": "node scripts/release-readiness.mjs",
     "sbom": "node scripts/generate-sbom.mjs",
     "intel:lookup": "node scripts/threat-intel-lookup.mjs",
+    "platform:linux": "node src/cli.mjs platform linux-audit --json",
+    "protection:readiness": "node src/cli.mjs protection-readiness --json",
     "ui:preview": "node desktop/preview-server.mjs",
     "dist:win": "npm run integrity:manifest && electron-builder --config electron-builder.yml --win nsis --x64 --publish never",
     "dist:win:unsigned": "npm run integrity:manifest && electron-builder --config electron-builder.yml --win nsis --x64 --publish never -c.forceCodeSigning=false",
     "demo": "node src/cli.mjs demo",
     "test": "node --test",
-    "check": "node --check src/cli.mjs && node --check src/engine.mjs && node --check src/static-analysis.mjs && node --check src/definition-security.mjs && node --check src/definition-updater.mjs && node --check src/definition-feed-service.mjs && node --check src/threat-intel-store.mjs && node --check src/threat-intel-feed-builder.mjs && node --check src/release-readiness.mjs && node --check src/ransomware-audit.mjs && node --check src/authenticode.mjs && node --check src/report-writer.mjs && node --check src/network-audit.mjs && node --check src/network-protection.mjs && node --check src/exposure-audit.mjs && node --check src/self-protection-audit.mjs && node --check src/edr-audit.mjs && node --check src/quarantine.mjs && node --check src/simulator.mjs && node --check src/app-service.mjs && node --check src/drive-roots.mjs && node --check src/internal-paths.mjs && node --check src/watch-service.mjs && node --check desktop/main.mjs && node --check desktop/ipc-auth.mjs && node --check desktop/ipc-contracts.mjs && node --check desktop/scan-worker.mjs && node --check desktop/target-vault.mjs && node --check desktop/update-service.mjs && node --check desktop/preload.cjs && node --check desktop/renderer/app.js && node --check scripts/generate-integrity-manifest.mjs && node --check scripts/create-definition-bundle.mjs && node --check scripts/create-definition-keypair.mjs && node --check scripts/collect-threat-intel-feed.mjs && node --check scripts/release-readiness.mjs && node --check scripts/generate-sbom.mjs && node --check scripts/threat-intel-lookup.mjs",
+    "check": "node --check src/cli.mjs && node --check src/platform-adapter.mjs && node --check src/linux-audit.mjs && node --check src/protection-readiness.mjs && node --check src/engine.mjs && node --check src/static-analysis.mjs && node --check src/definition-security.mjs && node --check src/definition-updater.mjs && node --check src/definition-feed-service.mjs && node --check src/threat-intel-store.mjs && node --check src/threat-intel-feed-builder.mjs && node --check src/release-readiness.mjs && node --check src/ransomware-audit.mjs && node --check src/authenticode.mjs && node --check src/report-writer.mjs && node --check src/network-audit.mjs && node --check src/network-protection.mjs && node --check src/exposure-audit.mjs && node --check src/self-protection-audit.mjs && node --check src/edr-audit.mjs && node --check src/quarantine.mjs && node --check src/simulator.mjs && node --check src/app-service.mjs && node --check src/drive-roots.mjs && node --check src/internal-paths.mjs && node --check src/watch-service.mjs && node --check desktop/main.mjs && node --check desktop/ipc-auth.mjs && node --check desktop/ipc-contracts.mjs && node --check desktop/scan-worker.mjs && node --check desktop/target-vault.mjs && node --check desktop/update-service.mjs && node --check desktop/preload.cjs && node --check desktop/renderer/app.js && node --check scripts/generate-integrity-manifest.mjs && node --check scripts/create-definition-bundle.mjs && node --check scripts/create-definition-keypair.mjs && node --check scripts/collect-threat-intel-feed.mjs && node --check scripts/release-readiness.mjs && node --check scripts/generate-sbom.mjs && node --check scripts/threat-intel-lookup.mjs",
     "ci": "npm run check && npm test"
   },
   "engines": {
