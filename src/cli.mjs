@@ -3,18 +3,23 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ScanEngine } from './engine.mjs';
+import { validateDefinitions } from './definition-security.mjs';
 import { Quarantine } from './quarantine.mjs';
 import { createHarmlessSimulation } from './simulator.mjs';
 import { WatchService } from './watch-service.mjs';
+import { collectLinuxAudit } from './linux-audit.mjs';
+import { getPlatformProfile } from './platform-adapter.mjs';
+import { inspectProtectionReadiness } from './protection-readiness.mjs';
 import { formatBytes, loadJson } from './util.mjs';
 
 const base = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const config = await loadJson(path.join(base, 'config', 'default.json'));
-const definitions = await loadJson(path.join(base, 'definitions', 'signatures.json'));
+const definitions = validateDefinitions(await loadJson(path.join(base, 'definitions', 'signatures.json')));
 const engine = new ScanEngine({ ...config, definitions });
 const quarantine = new Quarantine(process.env.AEGIS_QUARANTINE || path.join(base, config.quarantineDirectory));
-const [command = 'help', target = '.', ...flags] = process.argv.slice(2);
-const json = flags.includes('--json');
+const rawArgs = process.argv.slice(2);
+const json = rawArgs.includes('--json');
+const [command = 'help', target = '.', ...flags] = rawArgs.filter(value => value !== '--json');
 
 function printResult(r) {
   if (json) return;
@@ -77,13 +82,23 @@ try {
     if (report.summary.quarantined !== 1) throw new Error('Demo failed: simulation was not quarantined');
     console.log('Demo passed: the simulation was detected and moved to encrypted quarantine.');
   }
+  else if (command === 'platform') {
+    const report = target === 'linux-audit' ? await collectLinuxAudit() : getPlatformProfile();
+    if (json) console.log(JSON.stringify(report, null, 2));
+    else console.log(`${report.platform ?? report.profile?.platform}: ${report.mode} (${report.available === false ? 'unavailable' : 'available'})`);
+  }
+  else if (command === 'protection-readiness') {
+    const report = inspectProtectionReadiness();
+    if (json) console.log(JSON.stringify(report, null, 2));
+    else console.log(`${report.productMode}: ${report.summary.passed}/${report.summary.total} gates passed; ${report.summary.blockers} blockers.`);
+  }
   else if (command === 'quarantine' && target === 'list') console.log(JSON.stringify(await quarantine.list(), null, 2));
   else if (command === 'quarantine' && target === 'restore') {
     const id = flags[0];
     if (!id) throw new Error('Usage: quarantine restore <id> [destination]');
     console.log(`Restored to ${await quarantine.restore(id, flags[1])}`);
   } else {
-    console.log(`Aegis Guard — defensive Windows scanner\n\nCommands:\n  demo [directory]\n  scan <path> [--quarantine] [--json]\n  watch <directory> [--quarantine]\n  quarantine list\n  quarantine restore <id> [destination]\n\nExit codes: 0 clean, 1 operational error, 2 threat detected.`);
+    console.log(`Aegis Guard — defensive scanner\n\nCommands:\n  demo [directory]\n  scan <path> [--quarantine] [--json]\n  watch <directory> [--quarantine]\n  platform [linux-audit] [--json]\n  protection-readiness [--json]\n  quarantine list\n  quarantine restore <id> [destination]\n\nExit codes: 0 clean, 1 operational error, 2 threat detected.`);
   }
 } catch (error) {
   console.error(`Aegis error: ${error.message}`);

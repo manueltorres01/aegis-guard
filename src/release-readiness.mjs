@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 const PRIVATE_EXTENSIONS = new Set(['.pem', '.p12', '.pfx', '.key']);
-const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'dist-0.10.0', 'coverage', '.npm-cache', '.tmp-threat-intel']);
+const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'dist-0.10.0', 'dist-0.11.0', 'dist-0.12.0', 'coverage', '.npm-cache', '.tmp-threat-intel']);
 
 /**
  * Performs local, deterministic release checks. It cannot inspect GitHub

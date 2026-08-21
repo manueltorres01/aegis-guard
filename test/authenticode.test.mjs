@@ -13,7 +13,9 @@ test('Windows Authenticode verifier distinguishes a signed OS binary from an uns
   const unsigned = path.join(dir, 'unsigned.exe');
   await fs.writeFile(unsigned, 'MZ harmless unsigned test fixture');
 
-  const verify = createAuthenticodeVerifier();
+  // Hosted Windows runners can take longer to initialize the Authenticode
+  // provider than the product's bounded enrichment budget.
+  const verify = createAuthenticodeVerifier({ timeoutMs: 20_000 });
   const signedResult = await verify(path.join(process.env.SystemRoot, 'System32', 'kernel32.dll'));
   const unsignedResult = await verify(unsigned);
 

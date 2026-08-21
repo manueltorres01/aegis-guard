@@ -381,9 +381,9 @@ installer, its blockmap, and `latest.yml` generated together.
 Use semantic versions and require an exact match:
 
 ```text
-package.json version: 0.11.0
-Git tag:              v0.11.0
-GitHub Release:       v0.11.0
+package.json version: 0.13.0
+Git tag:              v0.13.0
+GitHub Release:       v0.13.0
 ```
 
 Enable GitHub immutable releases before the first public release. The safe

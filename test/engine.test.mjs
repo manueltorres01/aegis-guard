@@ -99,12 +99,16 @@ test('records valid trusted signatures and neutralizes only low-confidence binar
   const engine = new ScanEngine({
     definitions, threshold: 60, maxFileSizeMb: 1,
     trustedPublisherOrganizations: ['Microsoft Corporation'],
-    trustVerifier: async () => ({ status: 'valid', subject: 'CN=Microsoft Windows, O=Microsoft Corporation', organization: 'Microsoft Corporation' })
+    trustVerifier: async () => ({ status: 'valid', subject: 'CN=Microsoft Windows, O=Microsoft Corporation', organization: 'Microsoft Corporation', companyName:'Microsoft Corporation',productName:'Windows Component',fileVersion:'10.0.1',zoneId:3 })
   });
   const result = await engine.scanFile(sample);
   assert.equal(result.verdict, 'clean');
   assert.equal(result.score, 0);
   assert.equal(result.trust.organization, 'Microsoft Corporation');
+  assert.equal(result.trust.companyName, 'Microsoft Corporation');
+  assert.equal(result.trust.productName, 'Windows Component');
+  assert.equal(result.trust.fileVersion, '10.0.1');
+  assert.equal(result.trust.zoneId, 3);
   assert.ok(result.findings.some(x => x.id === 'trust.authenticode'));
 });
 
@@ -121,4 +125,54 @@ test('does not trust a valid signature from an unlisted publisher', async t => {
   const result = await engine.scanFile(sample);
   assert.equal(result.verdict, 'suspicious');
   assert.equal(result.score, 28);
+});
+
+test('verified application trust requires both the expected publisher and installation root', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-app-policy-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const installed = path.join(dir, 'Discord', 'app-1', 'Discord.exe');
+  const copied = path.join(dir, 'Elsewhere', 'Discord.exe');
+  await fs.mkdir(path.dirname(installed), { recursive: true });
+  await fs.mkdir(path.dirname(copied), { recursive: true });
+  const content = Buffer.concat([Buffer.from('MZ CreateRemoteThread VirtualAllocEx WriteProcessMemory '), Buffer.alloc(8192, 65)]);
+  await Promise.all([fs.writeFile(installed, content), fs.writeFile(copied, content)]);
+  const engine = new ScanEngine({
+    definitions, threshold: 60, maxFileSizeMb: 1,
+    trustedApplicationPolicies: [{ publisher: 'Discord Inc.', roots: [path.join(dir, 'Discord')] }],
+    trustVerifier: async () => ({ status: 'valid', subject: 'CN=Discord Inc., O=Discord Inc.', organization: 'Discord Inc.' })
+  });
+  const trusted = await engine.scanFile(installed);
+  const outside = await engine.scanFile(copied);
+  assert.equal(trusted.verdict, 'clean');
+  assert.equal(trusted.trust.applicationVerified, true);
+  assert.equal(outside.verdict, 'suspicious');
+  assert.equal(outside.trust.applicationVerified, false);
+});
+
+test('classifies a PUA separately and does not promote it to confirmed malware', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-pua-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'bundle.exe');
+  const content = Buffer.from('ordinary optional bundle');
+  await fs.writeFile(sample, content);
+  const sha256 = (await import('node:crypto')).createHash('sha256').update(content).digest('hex');
+  const engine = new ScanEngine({
+    definitions: { sha256: {}, puaSha256: { [sha256]: 'Bundled optional software' }, patterns: [] },
+    threshold: 60,
+    maxFileSizeMb: 1
+  });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.classification, 'pua');
+  assert.equal(result.verdict, 'suspicious');
+  assert.ok(result.findings.some(item => item.id === 'pua.sha256'));
+});
+
+test('matches a YARA-compatible hex string with bounded wildcards', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aegis-yara-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const sample = path.join(dir, 'sample.bin');
+  await fs.writeFile(sample, Buffer.from([0x41, 0x4d, 0x5a, 0x90, 0x00, 0x42]));
+  const engine = new ScanEngine({ definitions: { sha256: {}, patterns: [{ id: 'hex.demo', name: 'Hex demo', hex: '4D 5A ?? 00', score: 100 }] }, maxFileSizeMb: 1 });
+  const result = await engine.scanFile(sample);
+  assert.equal(result.verdict, 'malicious');
 });
