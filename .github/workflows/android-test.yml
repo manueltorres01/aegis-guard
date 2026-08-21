@@ -1,4 +1,4 @@
-name: Android test APK
+name: Android release APK
 
 on:
   push:
@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  build-debug-apk:
+  build-release-apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -37,12 +37,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build debug APK
-        run: gradle --no-daemon -p android-test :app:assembleDebug
-      - name: Upload debug APK
+      - name: Build release APK
+        run: gradle --no-daemon -p android-test :app:assembleRelease
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: aegis-guard-android-test-debug
-          path: android-test/app/build/outputs/apk/debug/app-debug.apk
+          name: aegis-guard-android-release-unsigned
+          path: android-test/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 14

@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="false"
-        android:label="Aegis Guard Test"
+        android:label="Aegis Guard"
         android:supportsRtl="true"
         android:theme="@style/Theme.AegisGuard">
         <activity
