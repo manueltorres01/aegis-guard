@@ -11,4 +11,3 @@ test('worker IPC messages require a valid HMAC and reject tampering', () => {
   assert.equal(verifyWorkerMessage(signed,crypto.randomBytes(32).toString('base64')),null);
   assert.equal(verifyWorkerMessage({kind:'request'},key),null);
 });
-

@@ -23,4 +23,3 @@ test('accepts an Ed25519-signed definition bundle and rejects rollback or tamper
   const tampered = { ...envelope, payloadBase64: Buffer.from(JSON.stringify({ ...definitions, version: 5 })).toString('base64') };
   assert.throws(() => verifySignedDefinitionEnvelope(tampered, options), /signature/);
 });
-

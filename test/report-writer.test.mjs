@@ -32,4 +32,3 @@ test('complete report writer produces valid JSON and spreadsheet-safe CSV', asyn
   assert.match(csv, /"'=HYPERLINK/);
   assert.match(csv, /"verifiedApplication"/);
 });
-

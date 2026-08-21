@@ -88,4 +88,3 @@ test('ransomware audit detects many distinct changes and bounds repeated alerts'
   assert.ok(subject.audit.status().recentAlerts.length <= 20);
   await subject.audit.stop({ removeCanaries: true });
 });
-

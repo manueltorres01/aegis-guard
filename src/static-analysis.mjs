@@ -169,4 +169,3 @@ function readCString(buffer, offset, maximum) {
 function add(analysis, id, description, score) {
   analysis.findings.push({ id, description, score });
 }
-

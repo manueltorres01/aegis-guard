@@ -30,4 +30,3 @@ function decodeKey(value) {
   if (key.length !== 32) throw new Error('Invalid IPC authentication key');
   return key;
 }
-

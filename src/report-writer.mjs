@@ -108,4 +108,3 @@ function csvCell(value) {
   if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   return `"${text.replace(/"/g, '""')}"`;
 }
-

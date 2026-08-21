@@ -10,7 +10,14 @@ const SCRIPT = [
   "$subject = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '' }",
   "$organization = if ($subject -match '(?:^|,\\s*)O=([^,]+)') { $Matches[1].Trim() } else { '' }",
   "$status = if ($signature) { $signature.Status.ToString() } else { 'Error' }",
-  "[pscustomobject]@{ Status = $status; Subject = $subject; Organization = $organization; IsOSBinary = ($signature.IsOSBinary -eq $true); Error = $signatureError } | ConvertTo-Json -Compress"
+  "$chainStatus = @()",
+  "$chainValid = $false",
+  "if ($signature.SignerCertificate) { $chain = [Security.Cryptography.X509Certificates.X509Chain]::new(); $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::Online; $chain.ChainPolicy.RevocationFlag = [Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot; $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(2); try { $chainValid = $chain.Build($signature.SignerCertificate); $chainStatus = @($chain.ChainStatus | ForEach-Object { $_.Status.ToString() }) } finally { $chain.Dispose() } }",
+  "$timestampSubject = if ($signature.TimeStamperCertificate) { $signature.TimeStamperCertificate.Subject } else { '' }",
+  "$version = try { [Diagnostics.FileVersionInfo]::GetVersionInfo($targetPath) } catch { $null }",
+  "$zone = ''",
+  "try { $zoneText = [IO.File]::ReadAllText($targetPath + ':Zone.Identifier'); if ($zoneText -match '(?m)^ZoneId=(\\d+)') { $zone = $Matches[1] } } catch {}",
+  "[pscustomobject]@{ Status = $status; StatusMessage = [string]$signature.StatusMessage; SignatureType = [string]$signature.SignatureType; Subject = $subject; Organization = $organization; IsOSBinary = ($signature.IsOSBinary -eq $true); Thumbprint = [string]$signature.SignerCertificate.Thumbprint; NotBefore = if ($signature.SignerCertificate) { $signature.SignerCertificate.NotBefore.ToUniversalTime().ToString('o') } else { '' }; NotAfter = if ($signature.SignerCertificate) { $signature.SignerCertificate.NotAfter.ToUniversalTime().ToString('o') } else { '' }; ChainValid = $chainValid; ChainStatus = $chainStatus; TimestampSubject = $timestampSubject; Timestamped = ($null -ne $signature.TimeStamperCertificate); CompanyName = [string]$version.CompanyName; ProductName = [string]$version.ProductName; FileVersion = [string]$version.FileVersion; ZoneId = $zone; Error = $signatureError } | ConvertTo-Json -Depth 3 -Compress"
 ].join('; ');
 
 export function createAuthenticodeVerifier({ cacheSize = 10_000, timeoutMs = 8_000 } = {}) {
@@ -47,7 +54,20 @@ function verify(file, timeoutMs) {
           status: String(parsed.Status ?? '').toLowerCase() === 'valid' ? 'valid' : 'invalid',
           subject: String(parsed.Subject ?? ''),
           organization: String(parsed.Organization ?? ''),
-          isOsBinary: parsed.IsOSBinary === true
+          isOsBinary: parsed.IsOSBinary === true,
+          statusMessage: String(parsed.StatusMessage ?? ''),
+          signatureType: String(parsed.SignatureType ?? ''),
+          thumbprint: String(parsed.Thumbprint ?? ''),
+          notBefore: String(parsed.NotBefore ?? ''),
+          notAfter: String(parsed.NotAfter ?? ''),
+          chainValid: parsed.ChainValid === true,
+          chainStatus: Array.isArray(parsed.ChainStatus) ? parsed.ChainStatus.map(String).slice(0, 16) : parsed.ChainStatus ? [String(parsed.ChainStatus)] : [],
+          timestamped: parsed.Timestamped === true,
+          timestampSubject: String(parsed.TimestampSubject ?? ''),
+          companyName: String(parsed.CompanyName ?? ''),
+          productName: String(parsed.ProductName ?? ''),
+          fileVersion: String(parsed.FileVersion ?? ''),
+          zoneId: /^\d+$/.test(String(parsed.ZoneId ?? '')) ? Number(parsed.ZoneId) : null
         });
       } catch (parseError) { reject(parseError); }
     });

@@ -44,4 +44,3 @@ test('script obfuscation requires encoded content and a dynamic execution primit
   assert.equal(benign.findings.length, 0);
   assert.ok(suspicious.findings.some(item => item.id === 'static.script.obfuscation'));
 });
-

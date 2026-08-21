@@ -127,11 +127,14 @@ test('deep scan includes hidden, excluded-name and deeply nested files but stays
   assert.equal(report.summary.malicious, expectedDetections.size);
   assert.equal(report.summary.skipped, 0);
   assert.equal(report.summary.errors, 0);
-  assert.equal(report.results.length, expectedDetections.size);
-  assert.deepEqual(new Set(report.results.map(result => result.path)), expectedDetections);
+  assert.deepEqual(
+    new Set(report.results.filter(result => result.verdict === 'malicious').map(result => result.path)),
+    expectedDetections
+  );
   assert.equal(report.results.some(result => result.path === excludedSimulation), true);
   assert.equal(report.results.some(result => result.path === outsideSimulation), false);
   if (linkCreated) {
+    assert.ok(report.results.some(result => result.verdict === 'skipped' && result.detailType === 'traversal-skip'));
     assert.ok(report.summary.traversalSkipped >= 1);
     assert.ok(report.summary.linksSkipped >= 1);
   }

@@ -57,4 +57,3 @@ try {
   $graphics.Dispose()
   $bitmap.Dispose()
 }
-
