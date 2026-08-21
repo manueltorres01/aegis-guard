@@ -8,6 +8,22 @@ export const IPC_CHANNELS = Object.freeze({
   listQuarantine: 'aegis:quarantine:list',
   quarantineIsolate: 'aegis:quarantine:isolate',
   restoreQuarantine: 'aegis:quarantine:restore',
+  showQuarantinePath: 'aegis:quarantine:path',
+  exportReport: 'aegis:report:export',
+  runNetworkAudit: 'aegis:network:audit',
+  exportNetworkReport: 'aegis:network:export',
+  applyNetworkProtection: 'aegis:network:protection:apply',
+  removeNetworkProtection: 'aegis:network:protection:remove',
+  runEdrAudit: 'aegis:edr:audit',
+  exportEdrReport: 'aegis:edr:export',
+  runExposureAudit: 'aegis:exposure:audit',
+  exportExposureReport: 'aegis:exposure:export',
+  runIntegrityAudit: 'aegis:integrity:audit',
+  exportIntegrityReport: 'aegis:integrity:export',
+  importDefinitionBundle: 'aegis:definitions:import',
+  rollbackDefinitions: 'aegis:definitions:rollback',
+  checkDefinitionFeed: 'aegis:definitions:feed:check',
+  queryThreatIntel: 'aegis:threat-intel:query',
   startMonitor: 'aegis:monitor:start',
   stopMonitor: 'aegis:monitor:stop',
   pauseProtection: 'aegis:protection:pause',
@@ -20,7 +36,7 @@ export const IPC_CHANNELS = Object.freeze({
 
 export const EVENT_CHANNEL = 'aegis:event';
 
-export const WORKER_PROTOCOL_VERSION = 1;
+export const WORKER_PROTOCOL_VERSION = 2;
 
 export const WORKER_ACTIONS = Object.freeze({
   initialize: 'service.initialize',
@@ -30,6 +46,21 @@ export const WORKER_ACTIONS = Object.freeze({
   listQuarantine: 'quarantine.list',
   isolateResult: 'quarantine.isolate',
   restoreQuarantine: 'quarantine.restore',
+  getLatestReport: 'report.latest',
+  runNetworkAudit: 'network.audit',
+  getLatestNetworkReport: 'network.report.latest',
+  applyNetworkProtection: 'network.protection.apply',
+  removeNetworkProtection: 'network.protection.remove',
+  runEdrAudit: 'edr.audit',
+  getLatestEdrReport: 'edr.report.latest',
+  runExposureAudit: 'exposure.audit',
+  getLatestExposureReport: 'exposure.report.latest',
+  runIntegrityAudit: 'integrity.audit',
+  getLatestIntegrityReport: 'integrity.report.latest',
+  applyDefinitionBundle: 'definitions.apply',
+  rollbackDefinitions: 'definitions.rollback',
+  checkDefinitionFeed: 'definitions.feed.check',
+  queryThreatIntel: 'threat-intel.query',
   startMonitor: 'monitor.start',
   stopMonitor: 'monitor.stop',
   pauseProtection: 'protection.pause',
@@ -98,6 +129,15 @@ export function parseRestore(value) {
   return { id: parseOpaqueId(input.id, 'quarantine identifier') };
 }
 
+export const parseQuarantinePath = parseRestore;
+
+export function parseExportReport(value) {
+  const input = assertPlainObject(value, 'report export request');
+  assertOnlyKeys(input, ['format']);
+  if (!['json', 'csv'].includes(input.format)) throw new ContractError('Unknown report format');
+  return { format: input.format };
+}
+
 export function parseIsolateResult(value) {
   const input = assertPlainObject(value, 'quarantine request');
   assertOnlyKeys(input, ['scanId', 'resultId']);
@@ -109,21 +149,33 @@ export function parseIsolateResult(value) {
 
 export function parseSettings(value) {
   const input = assertPlainObject(value, 'settings');
-  assertOnlyKeys(input, ['theme', 'autoQuarantine', 'notifications', 'checkUpdates', 'updateChannel', 'launchAtStartup']);
+  assertOnlyKeys(input, ['theme', 'autoQuarantine', 'notifications', 'checkUpdates', 'updateChannel', 'launchAtStartup', 'scheduledScanEnabled', 'scheduledScanMode', 'scheduledScanHour', 'skipScheduledScanOnBattery', 'ransomwareAuditEnabled', 'networkProtectionMode', 'reputationSharingEnabled']);
   const output = {};
   if (Object.hasOwn(input, 'theme')) {
     if (!THEMES.has(input.theme)) throw new ContractError('Unknown theme');
     output.theme = input.theme;
   }
-  for (const key of ['autoQuarantine', 'notifications', 'checkUpdates', 'launchAtStartup']) {
+  for (const key of ['autoQuarantine', 'notifications', 'checkUpdates', 'launchAtStartup', 'scheduledScanEnabled', 'skipScheduledScanOnBattery', 'ransomwareAuditEnabled', 'reputationSharingEnabled']) {
     if (Object.hasOwn(input, key)) {
       if (typeof input[key] !== 'boolean') throw new ContractError(`${key} must be a boolean`);
       output[key] = input[key];
     }
   }
+  if (Object.hasOwn(input, 'networkProtectionMode')) {
+    if (!['audit', 'block'].includes(input.networkProtectionMode)) throw new ContractError('Unknown network protection mode');
+    output.networkProtectionMode = input.networkProtectionMode;
+  }
   if (Object.hasOwn(input, 'updateChannel')) {
     if (!UPDATE_CHANNELS.has(input.updateChannel)) throw new ContractError('Unknown update channel');
     output.updateChannel = input.updateChannel;
+  }
+  if (Object.hasOwn(input, 'scheduledScanMode')) {
+    if (!['quick', 'full'].includes(input.scheduledScanMode)) throw new ContractError('Unknown scheduled scan mode');
+    output.scheduledScanMode = input.scheduledScanMode;
+  }
+  if (Object.hasOwn(input, 'scheduledScanHour')) {
+    if (!Number.isSafeInteger(input.scheduledScanHour) || input.scheduledScanHour < 0 || input.scheduledScanHour > 23) throw new ContractError('Invalid scheduled scan hour');
+    output.scheduledScanHour = input.scheduledScanHour;
   }
   return output;
 }
@@ -144,7 +196,7 @@ export function parseWorkerRequest(value) {
 
 export function parseWorkerInitialization(value) {
   const input = assertPlainObject(value, 'service initialization');
-  assertOnlyKeys(input, ['baseDirectory', 'dataDirectory', 'downloadsDirectory', 'quarantineKeyBase64']);
+  assertOnlyKeys(input, ['baseDirectory', 'dataDirectory', 'downloadsDirectory', 'protectedDirectories', 'quarantineKeyBase64']);
   const result = {};
   for (const key of ['baseDirectory', 'dataDirectory', 'downloadsDirectory']) {
     const candidate = input[key];
@@ -153,6 +205,9 @@ export function parseWorkerInitialization(value) {
     }
     result[key] = path.resolve(candidate);
   }
+  const protectedDirectories = input.protectedDirectories ?? [];
+  if (!Array.isArray(protectedDirectories) || protectedDirectories.length > 8) throw new ContractError('Invalid protectedDirectories');
+  result.protectedDirectories = protectedDirectories.map(value => parseAbsolutePath(value, 'protected directory'));
   if (!isCanonicalKey(input.quarantineKeyBase64)) throw new ContractError('Invalid quarantine encryption key');
   result.quarantineKeyBase64 = input.quarantineKeyBase64;
   return result;
@@ -169,8 +224,46 @@ export function parseWorkerActionPayload(action, value) {
     case WORKER_ACTIONS.pauseProtection:
     case WORKER_ACTIONS.resumeProtection:
     case WORKER_ACTIONS.createAndScanSimulation:
+    case WORKER_ACTIONS.runNetworkAudit:
+    case WORKER_ACTIONS.runEdrAudit:
+    case WORKER_ACTIONS.getLatestEdrReport:
+    case WORKER_ACTIONS.runExposureAudit:
+    case WORKER_ACTIONS.runIntegrityAudit:
+    case WORKER_ACTIONS.rollbackDefinitions:
+    case WORKER_ACTIONS.applyNetworkProtection:
+    case WORKER_ACTIONS.removeNetworkProtection:
     case WORKER_ACTIONS.shutdown:
       return assertEmptyObjectOrUndefined(value);
+    case WORKER_ACTIONS.checkDefinitionFeed:
+      return parseDefinitionFeedCheck(value);
+    case WORKER_ACTIONS.applyDefinitionBundle:
+      return parseDefinitionBundle(value);
+    case WORKER_ACTIONS.queryThreatIntel:
+      return parseThreatIntelQuery(value);
+    case WORKER_ACTIONS.getLatestReport: {
+      const input = assertPlainObject(value, 'latest report request');
+      assertOnlyKeys(input, ['format']);
+      if (!['json', 'csv'].includes(input.format)) throw new ContractError('Unknown report format');
+      return { format: input.format };
+    }
+    case WORKER_ACTIONS.getLatestNetworkReport: {
+      const input = assertPlainObject(value, 'latest network report request');
+      assertOnlyKeys(input, ['format']);
+      if (!['json', 'csv'].includes(input.format)) throw new ContractError('Unknown network report format');
+      return { format: input.format };
+    }
+    case WORKER_ACTIONS.getLatestExposureReport: {
+      const input = assertPlainObject(value, 'latest exposure report request');
+      assertOnlyKeys(input, ['format']);
+      if (!['json', 'csv'].includes(input.format)) throw new ContractError('Unknown exposure report format');
+      return { format: input.format };
+    }
+    case WORKER_ACTIONS.getLatestIntegrityReport: {
+      const input = assertPlainObject(value, 'latest integrity report request');
+      assertOnlyKeys(input, ['format']);
+      if (!['json', 'csv'].includes(input.format)) throw new ContractError('Unknown integrity report format');
+      return { format: input.format };
+    }
     case WORKER_ACTIONS.startScan: {
       const input = assertPlainObject(value, 'worker scan request');
       assertOnlyKeys(input, ['mode', 'target', 'autoQuarantine']);
@@ -229,6 +322,32 @@ export function serializeError(error, { includeDetails = false } = {}) {
   return output;
 }
 
+export function parseDefinitionBundle(value) {
+  const input = assertPlainObject(value, 'definition bundle');
+  assertOnlyKeys(input, ['schemaVersion', 'keyId', 'payloadBase64', 'signatureBase64']);
+  if (input.schemaVersion !== undefined && input.schemaVersion !== 1) throw new ContractError('Unknown definition bundle version');
+  if (typeof input.keyId !== 'string' || !/^[A-Za-z0-9._-]{1,80}$/.test(input.keyId)) throw new ContractError('Invalid definition signing key');
+  if (!isCanonicalBase64(input.payloadBase64) || input.payloadBase64.length > 22_400_000) throw new ContractError('Invalid definition payload');
+  if (!isCanonicalBase64(input.signatureBase64) || input.signatureBase64.length > 8_192) throw new ContractError('Invalid definition signature');
+  return { schemaVersion: 1, keyId: input.keyId, payloadBase64: input.payloadBase64, signatureBase64: input.signatureBase64 };
+}
+
+export function parseThreatIntelQuery(value) {
+  const input = assertPlainObject(value, 'threat intelligence query');
+  assertOnlyKeys(input, ['sha256', 'force']);
+  if (typeof input.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(input.sha256.trim())) throw new ContractError('Invalid SHA-256 hash');
+  if (input.force !== undefined && typeof input.force !== 'boolean') throw new ContractError('force must be a boolean');
+  return { sha256: input.sha256.trim().toLowerCase(), force: input.force === true };
+}
+
+export function parseDefinitionFeedCheck(value) {
+  if (value === undefined || value === null) return { force: false };
+  const input = assertPlainObject(value, 'definition feed request');
+  assertOnlyKeys(input, ['force']);
+  if (input.force !== undefined && typeof input.force !== 'boolean') throw new ContractError('force must be a boolean');
+  return { force: input.force === true };
+}
+
 function parseAbsolutePath(value, label) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 32_767 || !path.isAbsolute(value)) {
     throw new ContractError(`Invalid ${label}`);
@@ -267,4 +386,10 @@ function isCanonicalKey(value) {
   if (typeof value !== 'string' || value.length !== 44 || !/^[A-Za-z0-9+/]{43}=$/.test(value)) return false;
   const decoded = Buffer.from(value, 'base64');
   return decoded.length === 32 && decoded.toString('base64') === value;
+}
+
+function isCanonicalBase64(value) {
+  if (typeof value !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) return false;
+  try { return Buffer.from(value, 'base64').toString('base64') === value; }
+  catch { return false; }
 }

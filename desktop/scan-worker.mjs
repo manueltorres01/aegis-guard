@@ -6,9 +6,11 @@ import {
   serializeError
 } from './ipc-contracts.mjs';
 import { AppService } from '../src/app-service.mjs';
+import { signWorkerMessage, verifyWorkerMessage } from './ipc-auth.mjs';
 
 const MAX_REPORT_RESULTS = 5_000;
 const parentPort = process.parentPort;
+const authKey = process.env.AEGIS_WORKER_AUTH_KEY;
 
 if (!parentPort) throw new Error('Aegis scan worker must be started as an Electron utility process');
 
@@ -26,7 +28,9 @@ post({ kind: 'ready', protocolVersion: WORKER_PROTOCOL_VERSION });
 async function handleMessage(raw) {
   let request;
   try {
-    request = parseWorkerRequest(raw);
+    const verified = verifyWorkerMessage(raw, authKey);
+    if (!verified) throw operationError('WORKER_AUTH_FAILED', 'Unauthenticated worker request');
+    request = parseWorkerRequest(verified);
     const payload = parseWorkerActionPayload(request.action, request.payload);
     const result = await dispatch(request.action, payload);
     post({ kind: 'response', id: request.id, ok: true, result: limitLargeReports(result) });
@@ -65,6 +69,36 @@ async function dispatch(action, payload) {
       return { cancelled: Boolean(service.cancelScan()) };
     case WORKER_ACTIONS.listQuarantine:
       return service.listQuarantine();
+    case WORKER_ACTIONS.getLatestReport:
+      return service.getLatestReport(payload.format);
+    case WORKER_ACTIONS.runNetworkAudit:
+      return service.runNetworkAudit();
+    case WORKER_ACTIONS.getLatestNetworkReport:
+      return service.getLatestNetworkReport(payload.format);
+    case WORKER_ACTIONS.applyNetworkProtection:
+      return service.applyNetworkProtection();
+    case WORKER_ACTIONS.removeNetworkProtection:
+      return service.removeNetworkProtection();
+    case WORKER_ACTIONS.runEdrAudit:
+      return runLongOperation(() => service.runEdrAudit());
+    case WORKER_ACTIONS.getLatestEdrReport:
+      return service.getLatestEdrReport();
+    case WORKER_ACTIONS.runExposureAudit:
+      return runLongOperation(() => service.runExposureAudit());
+    case WORKER_ACTIONS.getLatestExposureReport:
+      return service.getLatestExposureReport(payload.format);
+    case WORKER_ACTIONS.runIntegrityAudit:
+      return runLongOperation(() => service.runIntegrityAudit());
+    case WORKER_ACTIONS.getLatestIntegrityReport:
+      return service.getLatestIntegrityReport(payload.format);
+    case WORKER_ACTIONS.applyDefinitionBundle:
+      return runLongOperation(() => service.applyDefinitionBundle(payload));
+    case WORKER_ACTIONS.rollbackDefinitions:
+      return runLongOperation(() => service.rollbackDefinitions());
+    case WORKER_ACTIONS.checkDefinitionFeed:
+      return runLongOperation(() => service.checkDefinitionFeed({ force: payload.force }));
+    case WORKER_ACTIONS.queryThreatIntel:
+      return runLongOperation(() => service.queryThreatIntel(payload.sha256, { force: payload.force }));
     case WORKER_ACTIONS.isolateResult:
       return service.isolateResult(payload.scanId, payload.resultId);
     case WORKER_ACTIONS.restoreQuarantine:
@@ -129,7 +163,7 @@ function limitLargeReports(value) {
 
 function post(message) {
   if (shuttingDown && message.kind === 'event') return;
-  parentPort.postMessage(message);
+  parentPort.postMessage(signWorkerMessage(message, authKey));
 }
 
 function operationError(code, message) {

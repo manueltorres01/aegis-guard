@@ -1,11 +1,16 @@
 node_modules/
+node_modules.locked-backup-*/
 .npm-cache/
 dist/
+dist-*/
+.tmp-threat-intel/
 .aegis-quarantine/
 coverage/
 *.log
 *.pfx
 *.p12
+*.pem
+*.key
 .DS_Store
 Thumbs.db
 .idea/

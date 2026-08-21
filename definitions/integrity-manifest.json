@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "version": "2026.08.20-local",
+  "generatedAt": "2026-08-21T00:00:41.972Z",
+  "signature": null,
+  "files": [
+    {
+      "path": "package.json",
+      "sha256": "fe29de4bd6fc4180d6af4f3f5950c1e8d779eb4bc2b697d2793375c9c0f192b1"
+    },
+    {
+      "path": "config/default.json",
+      "sha256": "55c666cd25eb387ffeea4e28dc640116d6152ee143eea155432a612b5bfaf1e8"
+    },
+    {
+      "path": "config/definition-keys.json",
+      "sha256": "f2a22cd0a685d0834d9a38769ddd1973b4988e57618833d7740d5f1b58f979ff"
+    },
+    {
+      "path": "config/definition-feed.json",
+      "sha256": "f1dbb1969a2db18e73ad95c3ba4b9c472deb35ea437abef21b2d7cc798db4063"
+    },
+    {
+      "path": "config/threat-intel.json",
+      "sha256": "92a34249b319e3b91e58e71a80d59e174ae44a68acf0ee73aa29a7b30cef8f54"
+    },
+    {
+      "path": "definitions/signatures.json",
+      "sha256": "0b4d6968b27fcbd4bb0444734ad92140cfbfcbdf92825a322ace9c4842ab7fc1"
+    },
+    {
+      "path": "definitions/network-indicators.json",
+      "sha256": "8969def8b047038123d7d52f1f53c406037a5b34c93aaac7e77cea462e11a38a"
+    },
+    {
+      "path": "definitions/application-policies.json",
+      "sha256": "cfe79a0d38ebe08aa529d93a693183adc3758fd95b2d9b71916aad29d2c94603"
+    },
+    {
+      "path": "src/definition-security.mjs",
+      "sha256": "6c438b3d4cd0d691ea75d0dadaa8e243a84aec9afd93c474d8e644a80fbbbbb4"
+    },
+    {
+      "path": "src/definition-updater.mjs",
+      "sha256": "c7bf27c62a219f2db663bc3443b9a2f5ca327731d2e7ece6ecb320ad3c2195c7"
+    },
+    {
+      "path": "src/definition-feed-service.mjs",
+      "sha256": "f89cf0cde4cdbc5a973a0199304a6c79b0d03cf5b3ee456130d26ae4a41aead7"
+    },
+    {
+      "path": "src/threat-intel-store.mjs",
+      "sha256": "73e964b799c0b795cec53733724bd50d0c26f3949f53792b0ed0a43e2445619a"
+    },
+    {
+      "path": "desktop/main.mjs",
+      "sha256": "69111ddd311124d6eee4cf1c9b28e6e07d82610a29279594be9a603531fbcc9a"
+    },
+    {
+      "path": "desktop/preload.cjs",
+      "sha256": "d2a3c17c438273bbe13bf1392ee02eabf918d0c775ec4d1bda7a3260b1066583"
+    },
+    {
+      "path": "desktop/scan-worker.mjs",
+      "sha256": "e4c05d03b0a65911714c38e089b83bec11abb10a2fffc3830f292b09ae8beec3"
+    },
+    {
+      "path": "desktop/ipc-contracts.mjs",
+      "sha256": "b4b30903fa1848c27350167b15c3bf85e94b18634fd5da97c73449643d599a95"
+    },
+    {
+      "path": "desktop/renderer/app.js",
+      "sha256": "11b0d1d03c65f2e245795844c2aaff07999782d0782359d40a750c110a1c29ea"
+    },
+    {
+      "path": "src/app-service.mjs",
+      "sha256": "3dd925505e7388380074597e0517b1fdbf563e994898543f352d373ae2997540"
+    },
+    {
+      "path": "src/engine.mjs",
+      "sha256": "a66f9bee357e2790b28d1e126ed78488824f326db6406f3fca0902ff5bc4ec58"
+    },
+    {
+      "path": "src/self-protection-audit.mjs",
+      "sha256": "12bc30a5e172203bedbb4dfd59ea4a5a3fd743ec219ae6b0b7862a4b3ae5c8e0"
+    }
+  ]
+}

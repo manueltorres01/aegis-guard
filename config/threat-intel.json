@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "circl": {
+    "enabled": true
+  },
+  "malwareBazaar": {
+    "enabled": false
+  },
+  "threatFox": {
+    "enabled": false
+  },
+  "cacheTtlHours": 24,
+  "networkTimeoutMs": 5000,
+  "maxRequestsPerMinute": 6
+}

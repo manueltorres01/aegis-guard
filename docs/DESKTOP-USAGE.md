@@ -5,6 +5,83 @@ application. Aegis is an experimental, on-demand second-opinion scanner. It
 does not replace Microsoft Defender, a supported endpoint security product or
 an incident-response process.
 
+## Network audit (0.2.3)
+
+The **Network** page takes a bounded, read-only snapshot of established or pending outbound TCP connections on Windows. It records the remote IP and port, correlates a domain only when the Windows DNS cache provides one, attributes the owning process, and records that executable's Authenticode publisher when accessible. It also reads the Windows Firewall profiles and Microsoft Defender status without changing either product.
+
+Events are compared with `definitions/network-indicators.json`. The bundled list is intentionally empty until Aegis has a signed, maintained intelligence-update channel; matching an administrator-supplied local indicator produces a suspicious audit event, not an automatic block. The latest capture is retained with native JSON and spreadsheet-safe CSV export, and the UI is capped at 500 events.
+
+This is endpoint visibility, not DDoS protection. A desktop application cannot absorb an upstream volumetric attack after the connection is saturated; that mitigation belongs at the router, ISP, hosting provider or scrubbing/CDN service.
+
+## Protección de red reversible (0.7.0)
+
+La página **Red** sigue en modo auditoría por defecto. Después de una captura,
+la interfaz muestra patrones de repetición de destinos, variación de puertos y
+volumen saliente elevado como indicios contextuales; esos indicios no cambian
+por sí solos el veredicto a malicioso.
+
+El selector **Bloqueo reversible** y el botón **Aplicar bloqueo** son una acción
+explícita. Solo se convierten en reglas de salida del Firewall de Windows las
+direcciones IP válidas presentes en los indicadores locales; los dominios se
+conservan como pendientes y no se resuelven mediante DNS. Las reglas llevan el
+grupo `Aegis Guard 0.7.0 Indicators`, y **Retirar reglas** elimina únicamente ese
+grupo. Windows puede solicitar permisos de administrador; un error se muestra
+como estado de la operación y no se presenta como bloqueo activo.
+
+Este control no aísla todo el equipo, no inspecciona URLs o contenido web y no
+mitiga ataques DDoS volumétricos. Esas funciones requieren controles de red
+perimetrales o una futura integración privilegiada revisada independientemente.
+
+## Local EDR audit (0.6.0)
+
+The **Incidentes** page runs a bounded, read-only Windows PowerShell snapshot on demand. It inventories process trees, startup commands, Run/RunOnce registry values, scheduled tasks and services, then correlates that snapshot with the latest network audit, ransomware alerts and recent file-monitor detections. Suspicious command patterns and user-writable persistence locations receive an explanation and MITRE ATT&CK technique identifiers; familiar application paths alone are never treated as proof of malware.
+
+The snapshot is deliberately limited to prevent an audit from becoming an unbounded resource consumer. It is not continuous ETW or native EDR telemetry, so file-write events remain **process not attributed**. Aegis does not claim credential-access or injection detection without stronger native evidence. The report is retained as a JSON file under the protected reports directory and can be downloaded from the page.
+
+All response fields are fixed to `audit` and `observed-only`: this version cannot terminate a process, remove a service/Run key, quarantine a related artifact or block activity. Those controls remain gated on a signed least-privilege service, identity-based policy and recovery tests.
+
+## Deeper static inspection (0.4.0)
+
+Aegis reads PE headers, section tables, entry-point placement and import-library names with explicit offset and section-count bounds. Writable/executable sections and packed-file entropy are low-confidence evidence: a valid signature from an exact trusted publisher or verified application policy can neutralize only those low-confidence findings. Invalid PE structure, exact signatures, archive-bomb declarations and script behavior are not allowlisted merely because a file is installed under a familiar directory.
+
+ZIP-family containers are inspected from bounded central-directory metadata without executing or extracting their contents. Aegis reports declared entry counts, aggregate sizes, extreme compression ratios, embedded executable counts and Office VBA projects. It recognizes 7z, RAR and MSI container headers, but recursive content decoding for those formats is not yet included; they are not presented as fully inspected. Script obfuscation requires combined evidence such as a long encoded payload plus dynamic execution, reducing matches on ordinary source text.
+
+Definitions accept exact SHA-256 indicators, PUA hashes and a constrained YARA-compatible hex-string form with `??` byte wildcards. The signed-definition envelope verifies Ed25519 signatures and rejects a version below the stored minimum. Version 0.10.0 stores accepted envelopes outside the packaged application, invalidates the scan cache, and keeps a bounded previous bundle so the user can roll back. The first release channel is a manual local import: the default public-key trust store is empty until a release key is provisioned, and no raw branch URL or automatic cloud feed is trusted.
+
+Potentially unwanted applications are labeled separately and remain a suspicious review result rather than confirmed malware unless an independent exact malware signature also matches. Complete JSON and CSV reports include this classification, bounded structural metadata, certificate-chain status and timestamp evidence.
+
+Authenticode verification records the signer, signature type, certificate validity, thumbprint, chain/revocation status and timestamp certificate when Windows exposes them. Windows catalog-backed status is obtained through `Get-AuthenticodeSignature`; inability to retrieve revocation data is retained as evidence and never silently changes a malicious result to clean. NTFS internet-zone metadata is recorded when a `Zone.Identifier` stream exists. General alternate-stream enumeration is still pending because it requires a bounded native Windows broker rather than one PowerShell process per scanned file.
+
+## Ransomware audit (0.5.0)
+
+Ransomware protection is optional and disabled by default. When enabled, Aegis observes the Windows Documents, Desktop and Pictures folders while the user-session process is running. It correlates distinct changes in a ten-second window, high-rate disappearance events and rename pairs where a second extension is appended. Thresholds are deliberately conservative, alerts are rate-limited and retained in bounded state.
+
+Aegis creates one plainly named `_AegisGuard_Canary_*.txt` document in every observed root. It never overwrites a pre-existing file: a name collision with different content disables that canary. Modification or removal creates an audit alert. Disabling the feature removes only intact canaries that Aegis owns; a changed file is left untouched for review.
+
+This release does not block, terminate or suspend a process. Node's directory watcher does not identify the process responsible for a write, so alerts explicitly report **process not attributed**. Reliable attribution and enforcement require a signed, least-privilege Windows service plus native ETW/minifilter telemetry and a tested allow-policy based on process identity. Until that exists, an alert is evidence for review, not proof that ransomware is present.
+
+Encrypted recovery copies are also not enabled in 0.5.0. A post-change watcher cannot guarantee possession of the original bytes, and copying whole controlled folders would create unacceptable storage and privacy risks. Recovery requires a bounded pre-write capture layer, authenticated metadata, quotas and rollback tests. Microsoft Defender controlled-folder protection and normal backups should remain enabled.
+
+## Resource usage (0.5.1)
+
+The scanner keeps its optimization state in the current process only. A bounded
+cache reuses a result only when the path, filesystem identity, size, timestamps,
+scan limit, definitions version and trust policy still match; expired entries,
+errors and size-limited results are not cached. A definitions or trust-policy
+change therefore causes a fresh scan without requiring a restart.
+
+Real-time monitoring coalesces repeated notifications for the same path and
+keeps both its pending-event and analysis queues bounded. If a burst exceeds
+those limits, Aegis raises a rate-limited warning and recommends a later scan;
+it does not label dropped work as clean. Background activity writes are debounced
+and serialized, while critical quarantine/restore writes remain immediate.
+
+The **Diagnóstico de protección** panel exposes cache entries and watcher queue
+depth. Completed reports include cache hits/misses, bytes read, working-buffer
+high-water mark and the selected concurrency. These are measurements from the
+current run, not a guaranteed CPU, RAM or battery percentage: disk speed,
+hardware, Windows power mode and the selected scan scope materially change them.
+
 ## Protection for Downloads
 
 Every new desktop session starts a watcher for the Windows **Downloads**
@@ -24,9 +101,53 @@ An eligible stable regular file is hashed and pattern-matched exhaustively in
 streaming chunks. The 128 MiB Quick-scan cutoff does not apply to Downloads or
 manual-folder protection; large files can therefore take longer to inspect.
 
-This protection runs in the Aegis process. It is not a Windows service, file-
-system driver or system-wide interception layer, and it stops when Aegis
-closes. Keep Microsoft Defender enabled.
+This protection runs in the Aegis user-session background process. Closing the window hides it in the Windows tray, so monitoring and enabled schedules continue; choosing **Salir y detener protección** from the tray ends it. It is not yet a Windows SCM service, file-system driver or system-wide interception layer. Signing out, shutting down Windows or explicitly exiting Aegis stops protection. Keep Microsoft Defender enabled.
+
+## Scheduled scans and recovery (0.3.0)
+
+Daily Quick or Full scans can be enabled in Settings and are disabled by default. Aegis can skip a scheduled run on battery; scans use bounded streaming concurrency and never start while another scan is active. Scheduling depends on Aegis running in the user session.
+
+Before a scan starts, Aegis records a bounded operation journal. If the process or Windows stops unexpectedly, the next start clears the incomplete operation safely, records a recovery event and exposes degraded health for review. The broker/worker protocol uses a per-session 256-bit HMAC key and rejects altered or unauthenticated messages.
+
+Quarantine offers **Ruta** to show the authenticated original location and **Restaurar** to return the file to that exact location. Restore never opens a destination selector and refuses to overwrite an existing file.
+
+## Auditoría de exposición (0.8.0)
+
+Abre **Exposición** y pulsa **Auditar ahora** para tomar una instantánea local de los volúmenes extraíbles que Windows presenta con letra, las aplicaciones instaladas, el estado de Firewall/Defender/UAC/Secure Boot y los consentimientos de cámara y micrófono. La vista incluye indicadores de editor/hash y excepciones con caducidad si se han añadido a `definitions/application-policies.json`.
+
+La función es deliberadamente de solo lectura y de alcance limitado: no bloquea USB, no desinstala aplicaciones, no cambia privacidad y no afirma que una aplicación sea vulnerable o segura solo por su versión. Los botones **JSON** y **CSV** guardan el informe completo mediante el diálogo nativo sin que tengas que abrir la carpeta interna de datos de Aegis. El informe CSV protege celdas que podrían interpretarse como fórmulas al abrirse en una hoja de cálculo.
+
+## Integridad y autoprotección (0.9.0)
+
+En **Integridad** puedes ejecutar una comprobación contra el manifiesto SHA-256 generado durante el empaquetado. Se revisan los archivos que participan en las decisiones de seguridad, la configuración y las definiciones. El informe diferencia componentes **verificados**, **modificados**, **ausentes** y **sin línea base**, y también se puede descargar en JSON o CSV.
+
+La línea base local es evidencia de auditoría, no una raíz de confianza del sistema: todavía no existe un servicio firmado con protección antimanipulación a nivel kernel. Aegis no repara, bloquea ni sustituye archivos automáticamente. La opción **Permitir consultas de reputación** permanece desactivada por defecto y su consentimiento queda guardado con retención local documentada. Al activarla, el botón **Reputación** de Resultados envía únicamente el SHA-256 del archivo: nunca sube el archivo ni la ruta. La respuesta se guarda en una caché local acotada y con caducidad.
+
+La primera fuente pública es CIRCL Hash Lookup, que aporta contexto de archivos conocidos (por ejemplo, NSRL y distribuciones) pero no constituye una garantía de que un archivo sea limpio. MalwareBazaar y ThreatFox quedan como proveedores opcionales de inteligencia de malware reciente; requieren un Auth-Key de abuse.ch, tienen límites de uso y deben revisarse antes de incorporarlos a una distribución comercial. Las consultas no se ejecutan automáticamente durante los análisis.
+
+Desde la raíz del proyecto se puede probar una consulta explícita con `npm run intel:lookup -- <sha256>`. `--offline` solo consulta la caché local y `--force` ignora una entrada vigente. El almacén se encuentra fuera del paquete, en `threat-intel/cache.json` dentro del directorio de datos de Aegis.
+
+## Actualización diaria de definiciones firmadas (0.11.0)
+
+El canal diario es una distribución de paquetes revisados, no una conexión de
+cada equipo a abuse.ch. El mantenedor/CI consulta las fuentes autorizadas,
+genera el paquete Ed25519 y lo publica en un endpoint HTTPS estable. El cliente
+solo activa el canal cuando la compilación incluye la clave pública de esa
+release y `config/definition-feed.json` tiene `enabled: true` y una URL HTTPS.
+
+Cuando está habilitado, Aegis comprueba el canal una vez cada 24 horas (con
+intervalo configurable entre 24 horas y 7 días). Usa `ETag` y
+`Last-Modified`, por lo que un `304 Not Modified` no descarga el paquete; los
+fallos activan backoff hasta 72 horas. El cuerpo tiene un límite de 16 MiB y
+cada cambio vuelve a pasar por la firma Ed25519, la versión mínima y el
+rollback de definiciones antes de que el motor lo utilice. No se envían rutas,
+archivos ni claves de proveedores.
+
+El botón **Buscar definiciones ahora** permite solicitar una comprobación
+manual. El ajuste interno `checkUpdates` mantiene las comprobaciones
+automáticas alineadas con la política de actualizaciones de la aplicación. Si
+el canal no está provisionado, el botón lo indica y la aplicación continúa
+usando las definiciones incluidas.
 
 ## Pause is session-only
 
@@ -79,9 +200,9 @@ are excluded from Quick scans are included.
 Deep scan traversal remains confined to the selected root. Symbolic links,
 Windows junctions and other reparse points are not followed, so they cannot
 redirect the scan to a sibling or unrelated location. The canonical quarantine
-vault and exactly registered staging files belonging to an active isolate or
-restore operation are excluded. Other files under Aegis's data directory are
-not broadly excluded. The legacy `custom` mode name is accepted for
+vault, the internal complete-report directory and exactly registered staging
+files belonging to an active isolate or restore operation are excluded. Other
+files under Aegis's data directory are not broadly excluded. The legacy `custom` mode name is accepted for
 compatibility but is normalized and reported as `deep`. Files are hashed in
 full and pattern matching preserves overlap between streaming chunks,
 including signatures that cross a chunk boundary.
@@ -131,16 +252,17 @@ partial summary and retained findings accumulated before cancellation. Pausing
 protection is a separate control and does not pause or cancel an on-demand
 scan.
 
-Detailed report storage is bounded by both 5,000 results that require
-attention and an estimated 8 MiB per report. When either bound is reached,
-retention priority is malicious, suspicious, file error, then skipped;
-lower-priority detail can be displaced so the most important findings remain
-reviewable. This limit does not stop filesystem traversal or analysis: summary
-counters and the `resultsTruncated` count still describe the complete run.
-Clean-file detail is not retained merely to create an enormous report. Manual
-isolation identifiers remain available for at most the four most recent scan
-jobs; an older result must be scanned again before it can be isolated through
-that identifier.
+The interactive Results table remains bounded by 5,000 attention results and
+an estimated 8 MiB per scan. Retention priority is malicious, suspicious, file
+error, then skipped, so the most important findings remain reviewable without
+an unbounded renderer payload. Separately, every scan streams all file results,
+including clean files, to complete JSON and spreadsheet-safe CSV reports under
+the application data directory. The Results view can copy either format to a
+user-selected destination through **Download report**; users do not need to
+browse internal application files. The internal report directory is excluded
+from scanning to prevent self-analysis. Manual isolation identifiers remain
+available for at most the four most recent scan jobs; an older result must be
+scanned again before it can be isolated through that identifier.
 
 ## Content and crash-recovery limits
 
@@ -176,6 +298,7 @@ visible warning while any warning count is nonzero.
 - Review suspicious heuristic findings before isolating them; legitimate tools
   can match scripting, entropy or macro heuristics.
 - Automatic quarantine is off by default. Quarantine is encrypted and
-  authenticated, and restore refuses to overwrite an existing destination.
+  authenticated. Restore returns to the authenticated original path without a
+  destination picker and refuses to overwrite an existing file.
 - If compromise is plausible, follow [INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md)
   rather than relying on a single Aegis result.

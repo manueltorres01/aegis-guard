@@ -98,6 +98,124 @@ the production updater:
 npm exec -- electron-builder --config electron-builder.yml --win nsis --x64 --publish never -c.forceCodeSigning=false
 ```
 
+The `dist:win` and `dist:win:unsigned` scripts generate the 0.9.0
+release-time integrity manifest automatically. If electron-builder is invoked
+directly, run this first:
+
+```powershell
+npm run integrity:manifest
+```
+
+## Daily signed definition feed
+
+The desktop client must not poll abuse.ch or another intelligence provider
+directly. A maintainer/CI job should fetch the licensed upstream data, review
+and normalize the indicators, then generate the same signed envelope used by
+the local importer:
+
+```powershell
+npm run definitions:bundle -- --key-id release-2026 --private-key C:\secure\aegis-definition-release.pem --input .\definitions\signatures.json --output .\dist\definitions.bundle.json
+```
+
+Publish that envelope at a stable HTTPS URL and provision the matching public
+key in `config/definition-keys.json`. The packaged client keeps the feed off by
+default; a release-specific `config/definition-feed.json` can enable it:
+
+For local development, the key pair can be created without paying for a
+certificate or a provider. Keep the private key outside the repository and
+write only the public trust file into the checkout:
+
+```powershell
+npm run definitions:keygen -- --key-id local-dev --private-key "$env:USERPROFILE\.aegis-guard\definition-release-private.pem" --public-config .\config\definition-keys.json
+```
+
+Use the resulting private key only with the bundle command. This is suitable
+for local testing, not for a public release: a production key must be held in
+an offline or protected CI secret and rotated under a documented ceremony.
+
+```json
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "url": "https://updates.example.com/aegis/definitions.bundle.json",
+  "intervalHours": 24,
+  "timeoutMs": 8000,
+  "maxBackoffHours": 72
+}
+```
+
+The updater performs at most one conditional request per day, sends no API
+credentials, enforces HTTPS and a 16 MiB response limit, caches `ETag` and
+`Last-Modified`, and backs off after failures. A `304 Not Modified` response
+does not download or validate a second copy. Every changed package is still
+verified by the Ed25519 trust store, version floor and rollback logic before
+the scanner adopts it. Keep the endpoint behind a CDN/object store with
+immutable versioned artifacts and a small stable pointer; do not put private
+signing keys or abuse.ch Auth-Keys in the application package.
+
+### Serverless daily collection with GitHub Actions
+
+This repository includes `.github/workflows/definitions-feed.yml`. It runs
+once per day (and can be started manually), queries only metadata from
+MalwareBazaar and ThreatFox, merges hashes with the reviewed local definitions,
+removes expired entries, signs the result with Ed25519 and commits it to
+`feeds/definitions.bundle.json`. GitHub hosts the static file, so no Aegis
+server or database needs to be operated.
+
+Before enabling the workflow:
+
+1. Generate a key pair and commit only the public key:
+
+   ```powershell
+   npm run definitions:keygen -- --key-id github-actions-2026 --private-key "$env:USERPROFILE\.aegis-guard\definition-release-private.pem" --public-config .\config\definition-keys.json
+   ```
+
+2. In the repository settings, create these Actions secrets:
+   `AEGIS_DEFINITION_KEY_ID` (the key ID above), `AEGIS_DEFINITION_PRIVATE_KEY`
+   (the complete PEM file) and `AEGIS_ABUSECH_AUTH_KEY` (the free abuse.ch
+   Auth-Key). The private key and Auth-Key are used only inside the runner and
+   are never sent to desktop clients.
+
+3. Run **Actions → Daily signed threat-intelligence feed → Run workflow** once
+   and confirm that `feeds/definitions.bundle.json` appears. The client feed
+   URL for this repository is:
+
+   ```text
+   https://raw.githubusercontent.com/manueltorres01/aegis-guard/main/feeds/definitions.bundle.json
+   ```
+
+   Enable it only in a release configuration after the public key has been
+   reviewed:
+
+   ```json
+   {"schemaVersion":1,"enabled":true,"url":"https://raw.githubusercontent.com/manueltorres01/aegis-guard/main/feeds/definitions.bundle.json","intervalHours":24,"timeoutMs":8000,"maxBackoffHours":72}
+   ```
+
+The community APIs are free under fair-use rules but may require an enhanced
+commercial plan when Aegis is sold. Scheduled GitHub jobs can be delayed and
+are disabled after 60 days without repository activity, so the workflow also
+supports manual runs and the desktop updater refuses to treat an unavailable
+feed as a clean result.
+
+### Release readiness and SBOM
+
+Before creating a public installer, run:
+
+```powershell
+npm run ci
+npm run release:readiness
+npm run sbom
+```
+
+`release:readiness` writes `dist/release-readiness.json` and blocks a strict
+release when the package/lock versions differ, the feed is enabled without a
+trusted public key, the collector workflow is missing or a private key file
+has been left in the project tree. It reports the GitHub secrets as an
+unverifiable external prerequisite rather than pretending they exist locally.
+`sbom` writes an SPDX 2.3 inventory of the exact `package-lock.json` graph to
+`dist/aegis-guard-<version>.spdx.json`; set `SOURCE_DATE_EPOCH` in CI when a
+stable creation timestamp is required.
+
 The signed production build is created with:
 
 ```powershell
@@ -188,9 +306,43 @@ validates the publisher. Metadata, installer, and blockmap must always come
 from the same build.
 
 Application auto-update does not make an unsigned remote
-`definitions/signatures.json` trustworthy. Until a separately signed,
-rollback-safe definitions protocol exists, definitions must ship inside the
-signed application release. Never update definitions from a raw branch URL.
+`definitions/signatures.json` trustworthy. The 0.10.0 definitions protocol
+accepts only an Ed25519-signed envelope with a provisioned public key, writes
+it outside the packaged application, rejects rollback versions and keeps a
+bounded previous bundle. The default trust store is empty until the release
+key ceremony is complete, so the signed application still ships with its
+bundled definitions. Never update definitions from a raw branch URL.
+
+Create a release bundle without putting the private key in the repository:
+
+```text
+npm run definitions:bundle -- --key-id release-2026 --private-key C:\secure\aegis-definition-release.pem --input definitions\signatures.json --output dist\definitions.bundle.json
+```
+
+The maintainer must provision only the matching public key in
+`config/definition-keys.json`; private keys belong in an offline or protected
+release environment. The desktop import action validates the envelope before
+activating it and exposes a rollback action when a previous bundle exists.
+
+## Threat-intelligence lookups
+
+The reputation layer is deliberately opt-in and hash-only. CIRCL Hash Lookup
+is enabled in `config/threat-intel.json` because its public service does not
+require an API key. MalwareBazaar and ThreatFox are disabled until an operator
+has reviewed the abuse.ch terms and configured both the provider flags and the
+`AEGIS_ABUSECH_AUTH_KEY` environment variable in the worker environment. The
+key is never written to settings, reports or the repository.
+
+For a controlled manual test:
+
+```text
+npm run intel:lookup -- <sha256>
+npm run intel:lookup -- <sha256> --offline
+```
+
+This sends only the supplied SHA-256 when online. It does not upload samples,
+download malware or turn a known-file match into a clean verdict. The desktop
+button is blocked until the user enables **Permitir consultas de reputación**.
 
 ## GitHub Releases publishing
 
@@ -209,10 +361,11 @@ GH_TOKEN
 `GH_TOKEN` is a publisher credential only. Never place it in
 `electron-builder.yml`, package it in the application, write it to logs, or ask
 end users to create one. Installed clients need no token to read public GitHub
-Releases. In a future GitHub Actions release job, map the job's short-lived
-`GITHUB_TOKEN` to `GH_TOKEN` and grant `contents: write` only to that job. Keep
-the default workflow permission at `contents: read`, protect signing secrets
-with a release environment and approval, and pin actions to full commit SHAs.
+Releases. The repository's `.github/workflows/cd.yml` maps the short-lived
+`GITHUB_TOKEN` to `GH_TOKEN` only in the signed release job. Its job-level
+permission is `contents: write`; the default workflow permission remains
+`contents: read`. Protect the `release` environment with approval and store
+`WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` there, never in the repository.
 
 To upload a signed build to a draft release:
 
@@ -228,9 +381,9 @@ installer, its blockmap, and `latest.yml` generated together.
 Use semantic versions and require an exact match:
 
 ```text
-package.json version: 0.2.0
-Git tag:              v0.2.0
-GitHub Release:       v0.2.0
+package.json version: 0.11.0
+Git tag:              v0.11.0
+GitHub Release:       v0.11.0
 ```
 
 Enable GitHub immutable releases before the first public release. The safe
@@ -260,5 +413,8 @@ Before publishing a draft:
 10. Review the draft, then publish it; do not publish directly from an
     unreviewed pull request or unprotected branch.
 
-No GitHub Actions release workflow is defined yet. Add it only after the real
-signing method and protected release environment have been chosen.
+The CD workflow runs only for a protected `vX.Y.Z` tag already contained in
+`main`. It runs the full CI suite, builds with `forceCodeSigning: true`, checks
+the Authenticode status and required `latest.yml`/blockmap, then creates a
+draft GitHub Release. Review the draft and publish it manually after the
+release checklist passes; unsigned builds are never uploaded by CD.

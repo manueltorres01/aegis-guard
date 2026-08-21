@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url';
 import {
   app,
   BrowserWindow,
+  Menu,
+  Tray,
   dialog,
   ipcMain,
+  powerMonitor,
   protocol,
   safeStorage,
   screen,
@@ -21,15 +24,20 @@ import {
   WORKER_PROTOCOL_VERSION,
   assertNoPayload,
   parseChooseTarget,
+  parseDefinitionFeedCheck,
+  parseExportReport,
   parseIsolateResult,
   parseMonitorStart,
   parseRestore,
+  parseQuarantinePath,
   parseSettings,
   parseStartScan,
+  parseThreatIntelQuery,
   serializeError
 } from './ipc-contracts.mjs';
 import { UpdateService } from './update-service.mjs';
 import { TargetVault } from './target-vault.mjs';
+import { signWorkerMessage, verifyWorkerMessage } from './ipc-auth.mjs';
 
 const APPLICATION_ORIGIN = 'aegis://app';
 const APPLICATION_ENTRY = `${APPLICATION_ORIGIN}/index.html`;
@@ -76,6 +84,11 @@ let activeMutationCount = 0;
 let backgroundLaunch = false;
 let startupRequested = true;
 let startupError = null;
+let tray = null;
+let scheduledSettings = null;
+let scheduledTimer = null;
+let lastScheduledDay = null;
+let definitionFeedCheckInFlight = false;
 const targetVault = new TargetVault();
 
 if (!hasInstanceLock) {
@@ -97,7 +110,7 @@ if (!hasInstanceLock) {
     void gracefulShutdown().finally(() => app.quit());
   });
 
-  app.on('window-all-closed', () => app.quit());
+  app.on('window-all-closed', () => {});
 
   app.on('activate', () => {
     if (!mainWindow && engine) void createMainWindow();
@@ -116,6 +129,7 @@ if (!hasInstanceLock) {
 }
 
 async function gracefulShutdown() {
+  if (scheduledTimer) { clearInterval(scheduledTimer); scheduledTimer = null; }
   if (!engine) return;
   try { await engine.shutdown(); }
   catch { /* a forced stop below is the fail-safe */ }
@@ -138,8 +152,11 @@ async function startApplication() {
     baseDirectory: app.getAppPath(),
     dataDirectory: app.getPath('userData'),
     downloadsDirectory: app.getPath('downloads'),
+    protectedDirectories: [app.getPath('documents'), app.getPath('desktop'), app.getPath('pictures')],
     quarantineKeyBase64: quarantineKey.value
   });
+  scheduledSettings = sanitizeSettings(initialBootstrap?.settings);
+  lastScheduledDay = await loadScheduledDay();
   applyLaunchAtStartup(initialBootstrap?.settings?.launchAtStartup !== false);
 
   updateService = new UpdateService({
@@ -150,6 +167,8 @@ async function startApplication() {
   await updateService.initialize();
 
   registerIpcHandlers();
+  createTray();
+  startScheduleLoop();
   await createMainWindow(applicationSession);
   if (quarantineKey.developmentFallback) {
     void dialog.showMessageBox(mainWindow, {
@@ -159,6 +178,81 @@ async function startApplication() {
       detail: 'La clave local de cuarentena se ha guardado con permisos restringidos. Las compilaciones distribuidas no permiten este fallback.'
     });
   }
+}
+
+function startScheduleLoop() {
+  if (scheduledTimer) clearInterval(scheduledTimer);
+  scheduledTimer = setInterval(() => void checkScheduledTasks(), 60_000);
+  scheduledTimer.unref?.();
+  void checkScheduledTasks();
+}
+
+async function checkScheduledTasks() {
+  await checkScheduledScan();
+  await checkScheduledDefinitionFeed();
+}
+
+async function checkScheduledScan(now = new Date()) {
+  const settings = scheduledSettings;
+  if (!settings?.scheduledScanEnabled || activeScanContext || now.getHours() !== settings.scheduledScanHour) return false;
+  const day = now.toISOString().slice(0, 10);
+  if (lastScheduledDay === day) return false;
+  if (settings.skipScheduledScanOnBattery && powerMonitor.isOnBatteryPower()) return false;
+  const mode = settings.scheduledScanMode === 'full' ? 'full' : 'quick';
+  const context = mode === 'full' ? fullTargetContext() : quickTargetContext();
+  activeScanContext = context;
+  lastScheduledDay = day;
+  await saveScheduledDay(day).catch(() => {});
+  try {
+    await engine.request(WORKER_ACTIONS.startScan, { mode, target: mode === 'quick' ? 'quick' : undefined, autoQuarantine: settings.autoQuarantine }, { timeoutMs: 0 });
+    return true;
+  } catch (error) {
+    publishEvent({ type:'scan-warning', payload:{ code:'SCHEDULED_SCAN_FAILED', message:error?.message ?? 'El análisis programado no pudo completarse.' } });
+    return false;
+  } finally { activeScanContext = null; }
+}
+
+async function checkScheduledDefinitionFeed() {
+  const settings = scheduledSettings;
+  if (settings?.checkUpdates === false || activeScanContext || shutdownStarted || definitionFeedCheckInFlight) return false;
+  definitionFeedCheckInFlight = true;
+  try {
+    const result = await engine.request(WORKER_ACTIONS.checkDefinitionFeed, { force: false }, { timeoutMs: 60_000 });
+    const safeResult = sanitizeDefinitionUpdateState(result);
+    if (safeResult?.feedResult === 'applied') publishEvent({ type: 'definitions-update-ready', payload: safeResult });
+    return safeResult?.feedResult ?? false;
+  } catch (error) {
+    publishEvent({ type: 'definitions-feed-warning', payload: { message: error?.message ?? 'No se pudo comprobar el canal de definiciones.' } });
+    return false;
+  } finally { definitionFeedCheckInFlight = false; }
+}
+
+async function loadScheduledDay() {
+  try {
+    const value = JSON.parse(await fs.readFile(path.join(app.getPath('userData'), 'schedule-state.json'), 'utf8'));
+    return typeof value?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.day) ? value.day : null;
+  } catch { return null; }
+}
+
+async function saveScheduledDay(day) {
+  const file = path.join(app.getPath('userData'), 'schedule-state.json');
+  const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify({ day }), { flag:'wx', mode:0o600 });
+  await fs.rename(temporary, file);
+}
+
+function createTray() {
+  if (tray || process.platform !== 'win32') return Boolean(tray);
+  try { tray = new Tray(path.join(app.getAppPath(), 'build', 'icon.png')); }
+  catch { tray = null; return false; }
+  tray.setToolTip('Aegis Guard · protección activa');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Abrir Aegis Guard', click: () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } } },
+    { type: 'separator' },
+    { label: 'Salir y detener protección', click: () => { isQuitting = true; app.quit(); } }
+  ]));
+  tray.on('double-click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } });
+  return true;
 }
 
 function applyLaunchAtStartup(requested) {
@@ -298,6 +392,12 @@ async function createMainWindow(applicationSession = session.fromPartition(APPLI
 
   window.once('ready-to-show', () => {
     if (!window.isDestroyed() && !backgroundLaunch) window.show();
+  });
+  window.on('close', event => {
+    if (isQuitting || shutdownStarted) return;
+    if (!tray) { isQuitting = true; return; }
+    event.preventDefault();
+    window.hide();
   });
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
@@ -501,6 +601,40 @@ function registerIpcHandlers() {
   });
 
   registerHandler(IPC_CHANNELS.restoreQuarantine, parseRestore, request => restoreQuarantine(request.id));
+  registerHandler(IPC_CHANNELS.showQuarantinePath, parseQuarantinePath, request => showQuarantinePath(request.id));
+  registerHandler(IPC_CHANNELS.exportReport, parseExportReport, request => exportLatestReport(request.format));
+  registerHandler(IPC_CHANNELS.runNetworkAudit, assertNoPayload, async () => sanitizeNetworkReport(
+    await engine.request(WORKER_ACTIONS.runNetworkAudit, undefined, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.exportNetworkReport, parseExportReport, request => exportLatestNetworkReport(request.format));
+  registerHandler(IPC_CHANNELS.applyNetworkProtection, assertNoPayload, async () => sanitizeNetworkProtection(
+    await engine.request(WORKER_ACTIONS.applyNetworkProtection, undefined, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.removeNetworkProtection, assertNoPayload, async () => sanitizeNetworkProtection(
+    await engine.request(WORKER_ACTIONS.removeNetworkProtection, undefined, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.runEdrAudit, assertNoPayload, async () => sanitizeEdrReport(
+    await engine.request(WORKER_ACTIONS.runEdrAudit, undefined, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.exportEdrReport, assertNoPayload, () => exportLatestEdrReport());
+  registerHandler(IPC_CHANNELS.runExposureAudit, assertNoPayload, async () => sanitizeExposureReport(
+    await engine.request(WORKER_ACTIONS.runExposureAudit, undefined, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.exportExposureReport, parseExportReport, request => exportLatestExposureReport(request.format));
+  registerHandler(IPC_CHANNELS.runIntegrityAudit, assertNoPayload, async () => sanitizeIntegrityReport(
+    await engine.request(WORKER_ACTIONS.runIntegrityAudit, undefined, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.exportIntegrityReport, parseExportReport, request => exportLatestIntegrityReport(request.format));
+  registerHandler(IPC_CHANNELS.importDefinitionBundle, assertNoPayload, importDefinitionBundle);
+  registerHandler(IPC_CHANNELS.rollbackDefinitions, assertNoPayload, async () => sanitizeDefinitionUpdateState(
+    await engine.request(WORKER_ACTIONS.rollbackDefinitions, undefined, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.checkDefinitionFeed, parseDefinitionFeedCheck, async request => sanitizeDefinitionUpdateState(
+    await engine.request(WORKER_ACTIONS.checkDefinitionFeed, request, { timeoutMs: 60_000 })
+  ));
+  registerHandler(IPC_CHANNELS.queryThreatIntel, parseThreatIntelQuery, async request => sanitizeThreatIntelResult(
+    await engine.request(WORKER_ACTIONS.queryThreatIntel, request, { timeoutMs: 60_000 })
+  ));
 
   registerHandler(IPC_CHANNELS.startMonitor, parseMonitorStart, async request => {
     const context = await targetVault.consume(request.targetId);
@@ -539,6 +673,7 @@ function registerIpcHandlers() {
     const saved = await engine.request(WORKER_ACTIONS.saveSettings, settings);
     const startup = applyLaunchAtStartup(saved.launchAtStartup !== false);
     const publicSettings = sanitizeSettings(saved);
+    scheduledSettings = publicSettings;
     return { ...publicSettings, settings: publicSettings, startup };
   });
 
@@ -624,25 +759,123 @@ async function restoreQuarantine(id) {
   const metadata = items.find(item => item?.id === id);
   if (!metadata) throw operationError('QUARANTINE_NOT_FOUND', 'El elemento ya no está en cuarentena.');
 
-  const fallbackName = safeLabel(path.basename(String(metadata.originalPath ?? 'archivo-restaurado')) || 'archivo-restaurado');
-  const originalPath = typeof metadata.originalPath === 'string' && path.isAbsolute(metadata.originalPath)
-    ? path.resolve(metadata.originalPath)
-    : path.join(app.getPath('downloads'), fallbackName);
-  const selected = await dialog.showSaveDialog(mainWindow, {
-    title: 'Restaurar archivo en…',
-    defaultPath: originalPath,
-    buttonLabel: 'Restaurar',
-    properties: ['showOverwriteConfirmation', 'dontAddToRecent']
-  });
-  if (selected.canceled || !selected.filePath) return { cancelled: true };
-
-  const destination = path.resolve(selected.filePath);
+  if (typeof metadata.originalPath !== 'string' || !path.isAbsolute(metadata.originalPath)) {
+    throw operationError('INVALID_ORIGINAL_PATH', 'La cuarentena no conserva una ruta original válida.');
+  }
+  const destination = path.resolve(metadata.originalPath);
   activeMutationCount++;
   let result;
   try { result = await engine.request(WORKER_ACTIONS.restoreQuarantine, { id, destination }); }
   finally { activeMutationCount--; }
   const label = safeLabel(path.basename(String(result ?? destination)));
   return { cancelled: false, restored: true, id, name: label, label };
+}
+
+async function showQuarantinePath(id) {
+  const inventory = await engine.request(WORKER_ACTIONS.listQuarantine);
+  const items = Array.isArray(inventory) ? inventory : Array.isArray(inventory?.items) ? inventory.items : [];
+  const metadata = items.find(item => item?.id === id);
+  if (!metadata || typeof metadata.originalPath !== 'string' || !path.isAbsolute(metadata.originalPath)) {
+    throw operationError('QUARANTINE_NOT_FOUND', 'No se conserva una ruta original válida para este elemento.');
+  }
+  const originalPath = path.resolve(metadata.originalPath);
+  await dialog.showMessageBox(mainWindow, {
+    type: 'info', title: 'Ruta original', message: path.basename(originalPath), detail: originalPath,
+    buttons: ['Cerrar'], defaultId: 0, cancelId: 0, noLink: true
+  });
+  return { shown: true };
+}
+
+async function exportLatestReport(format) {
+  const report = await engine.request(WORKER_ACTIONS.getLatestReport, { format });
+  const reportsRoot = path.resolve(app.getPath('userData'), 'reports');
+  const source = path.resolve(String(report?.path ?? ''));
+  const relative = path.relative(reportsRoot, source);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw operationError('INVALID_REPORT_PATH', 'La ruta interna del informe no es válida.');
+  }
+  const date = String(report.completedAt ?? new Date().toISOString()).slice(0, 10);
+  const selected = await dialog.showSaveDialog(mainWindow, {
+    title: 'Descargar informe completo',
+    defaultPath: path.join(app.getPath('downloads'), `Aegis-Guard-informe-${date}.${format}`),
+    buttonLabel: 'Guardar informe',
+    filters: [{ name: format === 'json' ? 'Informe JSON' : 'Informe CSV', extensions: [format] }],
+    properties: ['showOverwriteConfirmation', 'dontAddToRecent']
+  });
+  if (selected.canceled || !selected.filePath) return { cancelled: true };
+  const destination = path.resolve(selected.filePath);
+  await fs.copyFile(source, destination);
+  return { cancelled: false, format, count: safeCount(report.count), label: safeLabel(path.basename(destination)) };
+}
+
+async function exportLatestNetworkReport(format) {
+  const report = await engine.request(WORKER_ACTIONS.getLatestNetworkReport, { format });
+  const reportsRoot = path.resolve(app.getPath('userData'), 'reports');
+  const source = path.resolve(String(report?.path ?? ''));
+  const relative = path.relative(reportsRoot, source);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw operationError('INVALID_REPORT_PATH', 'La ruta interna del informe de red no es válida.');
+  const date = String(report.completedAt ?? new Date().toISOString()).slice(0, 10);
+  const selected = await dialog.showSaveDialog(mainWindow, { title:'Descargar auditoría de red', defaultPath:path.join(app.getPath('downloads'),`Aegis-Guard-red-${date}.${format}`), buttonLabel:'Guardar informe', filters:[{name:format==='json'?'Informe JSON':'Informe CSV',extensions:[format]}], properties:['showOverwriteConfirmation','dontAddToRecent'] });
+  if (selected.canceled || !selected.filePath) return { cancelled:true };
+  await fs.copyFile(source, path.resolve(selected.filePath));
+  return { cancelled:false, format, count:safeCount(report.count), label:safeLabel(path.basename(selected.filePath)) };
+}
+
+async function exportLatestEdrReport() {
+  const report = await engine.request(WORKER_ACTIONS.getLatestEdrReport);
+  const reportsRoot = path.resolve(app.getPath('userData'), 'reports');
+  const source = path.resolve(String(report?.path ?? ''));
+  const relative = path.relative(reportsRoot, source);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw operationError('INVALID_REPORT_PATH', 'La ruta interna del informe EDR no es válida.');
+  const date = String(report.completedAt ?? new Date().toISOString()).slice(0, 10);
+  const selected = await dialog.showSaveDialog(mainWindow, { title:'Descargar auditoría EDR', defaultPath:path.join(app.getPath('downloads'),`Aegis-Guard-EDR-${date}.json`), buttonLabel:'Guardar informe', filters:[{name:'Informe JSON',extensions:['json']}], properties:['showOverwriteConfirmation','dontAddToRecent'] });
+  if (selected.canceled || !selected.filePath) return { cancelled:true };
+  await fs.copyFile(source, path.resolve(selected.filePath));
+  return { cancelled:false, format:'json', count:safeCount(report.count), label:safeLabel(path.basename(selected.filePath)) };
+}
+
+async function exportLatestExposureReport(format) {
+  const report = await engine.request(WORKER_ACTIONS.getLatestExposureReport, { format });
+  const reportsRoot = path.resolve(app.getPath('userData'), 'reports');
+  const source = path.resolve(String(report?.path ?? ''));
+  const relative = path.relative(reportsRoot, source);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw operationError('INVALID_REPORT_PATH', 'La ruta interna del informe de exposición no es válida.');
+  const date = String(report.completedAt ?? new Date().toISOString()).slice(0, 10);
+  const selected = await dialog.showSaveDialog(mainWindow, { title:'Descargar inventario de exposición', defaultPath:path.join(app.getPath('downloads'),`Aegis-Guard-exposicion-${date}.${format}`), buttonLabel:'Guardar informe', filters:[{name:format==='json'?'Informe JSON':'Informe CSV',extensions:[format]}], properties:['showOverwriteConfirmation','dontAddToRecent'] });
+  if (selected.canceled || !selected.filePath) return { cancelled:true };
+  await fs.copyFile(source, path.resolve(selected.filePath));
+  return { cancelled:false, format, count:safeCount(report.count), label:safeLabel(path.basename(selected.filePath)) };
+}
+
+async function exportLatestIntegrityReport(format) {
+  const report = await engine.request(WORKER_ACTIONS.getLatestIntegrityReport, { format });
+  const reportsRoot = path.resolve(app.getPath('userData'), 'reports');
+  const source = path.resolve(String(report?.path ?? ''));
+  const relative = path.relative(reportsRoot, source);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw operationError('INVALID_REPORT_PATH', 'La ruta interna del informe de integridad no es válida.');
+  const date = String(report.completedAt ?? new Date().toISOString()).slice(0, 10);
+  const selected = await dialog.showSaveDialog(mainWindow, { title:'Descargar auditoría de integridad', defaultPath:path.join(app.getPath('downloads'),`Aegis-Guard-integridad-${date}.${format}`), buttonLabel:'Guardar informe', filters:[{name:format==='json'?'Informe JSON':'Informe CSV',extensions:[format]}], properties:['showOverwriteConfirmation','dontAddToRecent'] });
+  if (selected.canceled || !selected.filePath) return { cancelled:true };
+  await fs.copyFile(source, path.resolve(selected.filePath));
+  return { cancelled:false, format, count:safeCount(report.count), label:safeLabel(path.basename(selected.filePath)) };
+}
+
+async function importDefinitionBundle() {
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: 'Seleccionar paquete firmado de definiciones',
+    buttonLabel: 'Validar e instalar',
+    properties: ['openFile', 'dontAddToRecent'],
+    filters: [{ name: 'Paquete de definiciones Aegis', extensions: ['json'] }]
+  });
+  if (selected.canceled || selected.filePaths.length !== 1) return { cancelled: true };
+  const source = path.resolve(selected.filePaths[0]);
+  const stat = await fs.stat(source);
+  if (!stat.isFile() || stat.size > 16 * 1024 * 1024) throw operationError('DEFINITIONS_TOO_LARGE', 'El paquete de definiciones supera el límite permitido.');
+  let envelope;
+  try { envelope = JSON.parse(await fs.readFile(source, 'utf8')); }
+  catch { throw operationError('DEFINITIONS_BUNDLE_INVALID', 'El archivo seleccionado no contiene un paquete JSON válido.'); }
+  const result = await engine.request(WORKER_ACTIONS.applyDefinitionBundle, envelope, { timeoutMs: 60_000 });
+  return { cancelled: false, ...sanitizeDefinitionUpdateState(result) };
 }
 
 function publishEvent(event) {
@@ -782,6 +1015,10 @@ function sanitizeWorkerEvent(event) {
       return { type: event.type, payload: { message: 'La protección de Descargas no está disponible.' } };
     case 'protection-warning':
       return { type: event.type, payload: { message: 'La cola de protección está llena; recomendamos analizar Descargas.' } };
+    case 'ransomware-audit-state':
+      return { type: event.type, payload: sanitizeRansomwareAudit(payload) };
+    case 'ransomware-audit-alert':
+      return { type: event.type, payload: sanitizeRansomwareAlert(payload) };
     case 'quarantine-changed':
       {
         const item = payload.item ? sanitizeQuarantineItem(payload.item) : null;
@@ -798,6 +1035,10 @@ function sanitizeWorkerEvent(event) {
       }
     case 'settings-changed':
       return { type: event.type, payload: sanitizeSettings(payload) };
+    case 'definitions-changed':
+      return { type: event.type, payload: sanitizeDefinitionUpdateState(payload) };
+    case 'threat-intel-result':
+      return { type: event.type, payload: sanitizeThreatIntelResult(payload) };
     default:
       return null;
   }
@@ -820,7 +1061,12 @@ function sanitizeBootstrap(value) {
     engineVersion: safeLabel(input.version ?? app.getVersion()),
     definitions: {
       version: safeLabel(input.definitions?.version),
-      generatedAt: safeDate(input.definitions?.generatedAt)
+      generatedAt: safeDate(input.definitions?.generatedAt),
+      updates: sanitizeDefinitionUpdateState(input.definitions?.updates)
+    },
+    threatIntel: {
+      status: sanitizeThreatIntelStatus(input.threatIntel?.status),
+      latest: sanitizeThreatIntelResult(input.threatIntel?.latest)
     },
     definitionsVersion: safeLabel(input.definitions?.version),
     settings: sanitizeSettings(input.settings),
@@ -829,6 +1075,13 @@ function sanitizeBootstrap(value) {
     lastSummary,
     lastScan: lastSummary ? { completedAt: lastScanAt, summary: lastSummary } : null,
     totalScanned: lastSummary?.scanned ?? 0,
+    reportAvailable: Boolean(input.reportAvailable),
+    network: input.network ? sanitizeNetworkReport(input.network) : null,
+    networkProtection: sanitizeNetworkProtection(input.networkProtection),
+    edr: input.edr ? sanitizeEdrReport(input.edr) : null,
+    exposure: input.exposure ? sanitizeExposureReport(input.exposure) : null,
+    integrity: input.integrity ? sanitizeIntegrityReport(input.integrity) : null,
+    health: sanitizeHealth(input.health),
     activity: Array.isArray(input.activity) ? input.activity.slice(0, 100).map(sanitizeActivity) : [],
     quarantine,
     quarantineCount: quarantineInventory.total,
@@ -841,11 +1094,211 @@ function sanitizeBootstrap(value) {
     },
     monitor: sanitizeMonitorState(input.monitor, activeMonitorContext),
     protection: sanitizeProtectionState(input.protection),
+    performance: sanitizePerformance(input.performance),
+    ransomwareAudit: sanitizeRansomwareAudit(input.ransomwareAudit),
     updates: {
       ...(updateService?.publicState() ?? { status: 'unavailable' }),
       supported: updateService?.status !== 'unavailable',
       channel: 'stable'
     }
+  };
+}
+
+function sanitizeHealth(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    status: input.status === 'healthy' ? 'healthy' : 'degraded',
+    authenticatedWorkerIpc: Boolean(input.authenticatedWorkerIpc),
+    protectionAvailable: Boolean(input.protectionAvailable),
+    statePersistenceAvailable: Boolean(input.statePersistenceAvailable),
+    recoveredInterruptedOperation: Boolean(input.recoveredInterruptedOperation),
+    ransomwareAuditAvailable: Boolean(input.ransomwareAuditAvailable),
+    edrAuditAvailable: Boolean(input.edrAuditAvailable),
+    networkProtectionAvailable: Boolean(input.networkProtectionAvailable),
+    exposureAuditAvailable: Boolean(input.exposureAuditAvailable),
+    selfProtectionAvailable: Boolean(input.selfProtectionAvailable)
+  };
+}
+
+function sanitizeDefinitionUpdateState(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const source = ['bundled', 'updated'].includes(input.source) ? input.source : 'bundled';
+  const signatureStatus = ['bundled', 'verified'].includes(input.signature?.status) ? input.signature.status : source === 'updated' ? 'verified' : 'bundled';
+  const output = {
+    schemaVersion: 1,
+    currentVersion: safeCount(input.currentVersion),
+    bundledVersion: safeCount(input.bundledVersion),
+    source,
+    signature: { status: signatureStatus, keyId: safeLabel(input.signature?.keyId) },
+    rollbackAvailable: Boolean(input.rollbackAvailable),
+    lastAppliedAt: safeDate(input.lastAppliedAt),
+    lastRollbackAt: safeDate(input.lastRollbackAt),
+    lastError: input.lastError ? safeText(input.lastError, 500) : null,
+    updateChannelConfigured: Boolean(input.updateChannelConfigured),
+    networkEnabled: false,
+    feed: sanitizeDefinitionFeedStatus(input.feed)
+  };
+  if (typeof input.feedResult === 'string') output.feedResult = safeText(input.feedResult, 40);
+  if (input.feedVersion !== undefined && input.feedVersion !== null) output.feedVersion = safeCount(input.feedVersion);
+  if (typeof input.result === 'string') output.result = safeText(input.result, 40);
+  return output;
+}
+
+function sanitizeDefinitionFeedStatus(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  let host = null;
+  if (typeof input.url === 'string' && input.url.length > 0) {
+    try { host = new URL(input.url).hostname.slice(0, 255); } catch { host = null; }
+  }
+  return {
+    schemaVersion: 1,
+    enabled: Boolean(input.enabled),
+    configured: Boolean(input.configured),
+    host,
+    intervalHours: safeCount(input.intervalHours),
+    due: Boolean(input.due),
+    inFlight: Boolean(input.inFlight),
+    lastCheckedAt: safeDate(input.lastCheckedAt),
+    lastSuccessfulAt: safeDate(input.lastSuccessfulAt),
+    nextCheckAt: safeDate(input.nextCheckAt),
+    lastAppliedVersion: safeCount(input.lastAppliedVersion),
+    lastError: input.lastError ? safeText(input.lastError, 500) : null,
+    consecutiveFailures: safeCount(input.consecutiveFailures),
+    etagStored: Boolean(input.etagStored),
+    lastModifiedStored: Boolean(input.lastModifiedStored)
+  };
+}
+
+function sanitizeThreatIntelStatus(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const providers = input.providers && typeof input.providers === 'object' ? input.providers : {};
+  const providerState = name => ({
+    enabled: Boolean(providers[name]?.enabled),
+    configured: Boolean(providers[name]?.configured),
+    requiresKey: Boolean(providers[name]?.requiresKey)
+  });
+  return {
+    schemaVersion: 1,
+    cacheEntries: safeCount(input.cacheEntries),
+    cacheMaxEntries: safeCount(input.cacheMaxEntries),
+    ttlMs: safeCount(input.ttlMs),
+    lastLookupAt: safeDate(input.lastLookupAt),
+    providers: {
+      circl: providerState('circl'),
+      malwareBazaar: providerState('malwareBazaar'),
+      threatFox: providerState('threatFox')
+    },
+    networkEnabled: Boolean(input.networkEnabled),
+    fileUploadEnabled: false
+  };
+}
+
+function sanitizeThreatIntelResult(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  if (!/^[a-f0-9]{64}$/i.test(String(input.sha256 ?? ''))) return null;
+  const sources = Array.isArray(input.sources) ? input.sources.slice(0, 8).map(source => ({
+    provider: safeLabel(source?.provider),
+    status: safeLabel(source?.status),
+    kind: safeLabel(source?.kind),
+    confidence: safeCount(source?.confidence),
+    trust: safeCount(source?.trust),
+    signature: safeText(source?.signature, 240),
+    source: safeText(source?.source, 120),
+    fileName: safeText(source?.fileName, 240),
+    fileSize: safeCount(source?.fileSize),
+    firstSeen: safeDate(source?.firstSeen),
+    families: Array.isArray(source?.families) ? source.families.slice(0, 16).map(item => safeText(item, 160)) : [],
+    tags: Array.isArray(source?.tags) ? source.tags.slice(0, 16).map(item => safeText(item, 80)) : [],
+    matches: safeCount(source?.matches),
+    error: source?.error ? safeText(source.error, 240) : null
+  })).filter(source => source.provider && source.status) : [];
+  return {
+    schemaVersion: 1,
+    sha256: String(input.sha256).toLowerCase(),
+    verdict: ['known-malicious', 'known-file-context', 'unknown', 'unavailable'].includes(input.verdict) ? input.verdict : 'unknown',
+    confidence: safeCount(input.confidence),
+    queriedAt: safeDate(input.queriedAt),
+    expiresAt: safeDate(input.expiresAt),
+    sources
+  };
+}
+
+function sanitizeNetworkReport(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const events = Array.isArray(input.events) ? input.events.slice(0, 500).map(item => ({
+    verdict: item?.verdict === 'suspicious' ? 'suspicious' : 'observed',
+    explanation: safeText(item?.explanation, 500), protocol: safeLabel(item?.protocol),
+    remoteAddress: safeText(item?.remoteAddress, 128), remotePort: safeCount(item?.remotePort), domain: safeText(item?.domain, 253),
+    process: { id:safeCount(item?.process?.id), name:safeText(item?.process?.name,260), path:safeText(item?.process?.path,1000) }, bytesSent:safeCount(item?.bytesSent), bytesReceived:safeCount(item?.bytesReceived), anomalies:Array.isArray(item?.anomalies)?item.anomalies.slice(0,8).map(value=>safeText(value,80)):[], anomalySeverity:['info','low','medium'].includes(item?.anomalySeverity)?item.anomalySeverity:'info',
+    signature: { status:item?.signature?.status==='valid'?'valid':'unverified', publisher:safeText(item?.signature?.publisher,300) }
+  })) : [];
+  return { completedAt:safeDate(input.completedAt), reportAvailable:Boolean(input.reportAvailable), summary:{connections:safeCount(input.summary?.connections),suspicious:safeCount(input.summary?.suspicious),unsignedProcesses:safeCount(input.summary?.unsignedProcesses),anomalous:safeCount(input.summary?.anomalous),repeatedDestinations:safeCount(input.summary?.repeatedDestinations),portScanPatterns:safeCount(input.summary?.portScanPatterns),probableExfiltration:safeCount(input.summary?.probableExfiltration),truncated:Boolean(input.summary?.truncated)}, protection:sanitizeNetworkProtection(input.protection), windowsSecurity:{firewall:Array.isArray(input.windowsSecurity?.firewall)?input.windowsSecurity.firewall.slice(0,8).map(x=>({name:safeLabel(x?.name),enabled:Boolean(x?.enabled),defaultInboundAction:safeLabel(x?.defaultInboundAction),defaultOutboundAction:safeLabel(x?.defaultOutboundAction)})):[],defender:input.windowsSecurity?.defender?{antivirusEnabled:Boolean(input.windowsSecurity.defender.antivirusEnabled),realTimeProtectionEnabled:Boolean(input.windowsSecurity.defender.realTimeProtectionEnabled),networkInspectionEnabled:Boolean(input.windowsSecurity.defender.networkInspectionEnabled)}:null}, events };
+}
+
+function sanitizeNetworkProtection(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return { mode: input.mode === 'block' ? 'block' : 'audit', active: Boolean(input.active), addressesBlocked: safeCount(input.addressesBlocked), domainsPending: safeCount(input.domainsPending), skippedDomains: Array.isArray(input.skippedDomains) ? input.skippedDomains.slice(0,256).map(value=>safeText(value,253)) : [], rules: Array.isArray(input.rules) ? input.rules.slice(0,256).map(value=>safeText(value,240)) : [], lastChangedAt: safeDate(input.lastChangedAt), error: input.error ? safeText(input.error,500) : null, blocking: false, reversible: true, group: 'Aegis Guard 0.7.0 Indicators' };
+}
+
+function sanitizeEdrReport(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const processes = Array.isArray(input.processes) ? input.processes.slice(0, 512).map(item => ({ pid:safeCount(item?.pid), parentPid:safeCount(item?.parentPid), name:safeText(item?.name,260), path:safeText(item?.path,1000), commandLine:safeText(item?.commandLine,2000), createdAt:safeDate(item?.createdAt), children:Array.isArray(item?.children)?item.children.slice(0,32).map(safeCount):[] })) : [];
+  const persistenceArtifacts = Array.isArray(input.persistenceArtifacts) ? input.persistenceArtifacts.slice(0,1024).map(item => ({ type:safeText(item?.type,80), name:safeText(item?.name,260), path:safeText(item?.path,1000), command:safeText(item?.command,2000), userWritable:Boolean(item?.userWritable), verdict:item?.verdict==='suspicious'?'suspicious':'observed', techniqueIds:Array.isArray(item?.techniqueIds)?item.techniqueIds.slice(0,8).map(value=>safeText(value,40)):[], techniqueLabels:Array.isArray(item?.techniqueLabels)?item.techniqueLabels.slice(0,8).map(value=>safeText(value,180)):[], explanation:safeText(item?.explanation,500) })) : [];
+  const events = Array.isArray(input.events) ? input.events.slice(0,300).map(item => ({ id:safeUuid(item?.id) ?? crypto.randomUUID(), at:safeDate(item?.at), kind:['process','persistence','network','file','ransomware'].includes(item?.kind)?item.kind:'process', severity:['info','low','medium','high','critical'].includes(item?.severity)?item.severity:'info', verdict:item?.verdict==='suspicious'?'suspicious':'observed', title:safeText(item?.title,260), explanation:safeText(item?.explanation,500), source:'local-audit', techniqueIds:Array.isArray(item?.techniqueIds)?item.techniqueIds.slice(0,8).map(value=>safeText(value,40)):[], techniqueLabels:Array.isArray(item?.techniqueLabels)?item.techniqueLabels.slice(0,8).map(value=>safeText(value,180)):[], process:sanitizeEdrProcess(item?.process), artifact:item?.artifact&&typeof item.artifact==='object'?{type:safeText(item.artifact.type,80),path:safeText(item.artifact.path,1000),label:safeText(item.artifact.label,260)}:null, action:'observed-only' })) : [];
+  const incidents = Array.isArray(input.incidents) ? input.incidents.slice(0,100).map(item => ({ id:safeUuid(item?.id) ?? crypto.randomUUID(), at:safeDate(item?.at), severity:['medium','high','critical'].includes(item?.severity)?item.severity:'medium', title:safeText(item?.title,260), status:'observed', eventCount:safeCount(item?.eventCount), eventIds:Array.isArray(item?.eventIds)?item.eventIds.slice(0,50).map(value=>safeText(value,80)):[], techniqueIds:Array.isArray(item?.techniqueIds)?item.techniqueIds.slice(0,8).map(value=>safeText(value,40)):[], techniqueLabels:Array.isArray(item?.techniqueLabels)?item.techniqueLabels.slice(0,8).map(value=>safeText(value,180)):[], process:sanitizeEdrProcess(item?.process), response:sanitizeEdrResponse() })) : [];
+  const jsonFile = typeof input.jsonFile === 'string' && path.basename(input.jsonFile) === input.jsonFile ? input.jsonFile : null;
+  return { schemaVersion:1, mode:'audit', available:Boolean(input.available), source:input.source==='windows-powershell'?'windows-powershell':'unavailable', startedAt:safeDate(input.startedAt), completedAt:safeDate(input.completedAt), reportAvailable:Boolean(input.reportAvailable||jsonFile), jsonFile, limitations:Array.isArray(input.limitations)?input.limitations.slice(0,8).map(value=>safeText(value,500)):[], summary:{processes:safeCount(input.summary?.processes),processTreeEdges:safeCount(input.summary?.processTreeEdges),persistenceArtifacts:safeCount(input.summary?.persistenceArtifacts),timelineEvents:safeCount(input.summary?.timelineEvents),incidents:safeCount(input.summary?.incidents),suspicious:safeCount(input.summary?.suspicious),truncated:Boolean(input.summary?.truncated)}, processes, processTreeEdges:Array.isArray(input.processTreeEdges)?input.processTreeEdges.slice(0,512).map(edge=>({parentPid:safeCount(edge?.parentPid),childPid:safeCount(edge?.childPid)})):[], persistenceArtifacts, events, incidents, response:sanitizeEdrResponse(), error:input.error?safeText(input.error,500):undefined };
+}
+
+function sanitizeExposureReport(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const fileName = name => typeof name === 'string' && path.basename(name) === name ? name : null;
+  const devices = Array.isArray(input.devices) ? input.devices.slice(0, 64).map(item => ({ id:safeText(item?.id,80), drive:safeText(item?.drive,8), label:safeText(item?.label,260), fileSystem:safeText(item?.fileSystem,80), sizeBytes:safeCount(item?.sizeBytes), freeBytes:safeCount(item?.freeBytes), provider:safeText(item?.provider,260), status:'observed', control:'audit-only' })) : [];
+  const applications = Array.isArray(input.applications) ? input.applications.slice(0, 1_000).map(item => ({ name:safeText(item?.name,260), publisher:safeText(item?.publisher,260), version:safeText(item?.version,120), installDate:safeText(item?.installDate,32), installLocation:safeText(item?.installLocation,1_000), uninstallString:safeText(item?.uninstallString,2_000), estimatedSizeKb:safeCount(item?.estimatedSizeKb), policy:{ status:['publisher-allowed','exception','expired-exception','unmatched'].includes(item?.policy?.status)?item.policy.status:'unmatched', severity:['info','low','medium','high'].includes(item?.policy?.severity)?item.policy.severity:'info', hash:null, enforcement:'audit-only', explanation:safeText(item?.policy?.explanation,500) } })) : [];
+  const unsafeSettings = Array.isArray(input.unsafeSettings) ? input.unsafeSettings.slice(0, 64).map(item => ({ id:safeText(item?.id,80), title:safeText(item?.title,260), severity:['low','medium','high'].includes(item?.severity)?item.severity:'info', explanation:safeText(item?.explanation,500) })) : [];
+  const privacy = Array.isArray(input.privacy) ? input.privacy.slice(0, 256).map(item => ({ capability:['webcam','microphone'].includes(item?.capability)?item.capability:'webcam', app:safeText(item?.app,260), decision:['allowed','denied','unknown'].includes(item?.decision)?item.decision:'unknown', lastUsed:safeDate(item?.lastUsed), severity:['low','medium','high'].includes(item?.severity)?item.severity:'info', explanation:safeText(item?.explanation,500) })) : [];
+  const policies = input.policies && typeof input.policies === 'object' ? { mode:'audit', publishers:Array.isArray(input.policies.publishers)?input.policies.publishers.slice(0,256).map(value=>safeText(value,260)):[], hashes:Array.isArray(input.policies.hashes)?input.policies.hashes.slice(0,256).map(value=>/^[a-f0-9]{64}$/i.test(String(value))?String(value).toLowerCase():'').filter(Boolean):[], exceptions:Array.isArray(input.policies.exceptions)?input.policies.exceptions.slice(0,256).map(item=>({name:safeText(item?.name,260),expiresAt:safeDate(item?.expiresAt),reason:safeText(item?.reason,500)})):[], expiredExceptions:Array.isArray(input.policies.expiredExceptions)?input.policies.expiredExceptions.slice(0,256).map(item=>({name:safeText(item?.name,260),expiresAt:safeDate(item?.expiresAt),reason:safeText(item?.reason,500)})):[], enforcementAvailable:false, blocking:false } : { mode:'audit', publishers:[], hashes:[], exceptions:[], expiredExceptions:[], enforcementAvailable:false, blocking:false };
+  return { schemaVersion:1, mode:'audit', available:Boolean(input.available), source:input.source==='windows-powershell'?'windows-powershell':'unavailable', startedAt:safeDate(input.startedAt), completedAt:safeDate(input.completedAt), reportAvailable:Boolean(input.reportAvailable || fileName(input.jsonFile)), jsonFile:fileName(input.jsonFile), csvFile:fileName(input.csvFile), error:input.error?safeText(input.error,500):undefined, limitations:Array.isArray(input.limitations)?input.limitations.slice(0,8).map(item=>safeText(item,500)):[], summary:{removableDevices:safeCount(input.summary?.removableDevices),applications:safeCount(input.summary?.applications),applicationsWithoutVersion:safeCount(input.summary?.applicationsWithoutVersion),applicationsWithoutPublisher:safeCount(input.summary?.applicationsWithoutPublisher),unsafeSettings:safeCount(input.summary?.unsafeSettings),privacyEntries:safeCount(input.summary?.privacyEntries),policyIndicators:safeCount(input.summary?.policyIndicators),expiredExceptions:safeCount(input.summary?.expiredExceptions),truncated:Boolean(input.summary?.truncated)}, devices, applications, unsafeSettings, privacy, security:{firewall:Array.isArray(input.security?.firewall)?input.security.firewall.slice(0,8).map(item=>({name:safeLabel(item?.name),enabled:Boolean(item?.enabled),defaultInboundAction:safeLabel(item?.defaultInboundAction),defaultOutboundAction:safeLabel(item?.defaultOutboundAction)})):[], defender:input.security?.defender?{antivirusEnabled:Boolean(input.security.defender.antivirusEnabled),realTimeProtectionEnabled:Boolean(input.security.defender.realTimeProtectionEnabled),behaviorMonitorEnabled:Boolean(input.security.defender.behaviorMonitorEnabled),networkInspectionEnabled:Boolean(input.security.defender.networkInspectionEnabled)}:null, uac:input.security?.uac?{enableLUA:Boolean(input.security.uac.enableLUA),consentPromptBehaviorAdmin:safeCount(input.security.uac.consentPromptBehaviorAdmin),promptOnSecureDesktop:Boolean(input.security.uac.promptOnSecureDesktop)}:null, secureBoot:Boolean(input.security?.secureBoot)}, policies };
+}
+
+function sanitizeIntegrityReport(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const fileName = name => typeof name === 'string' && path.basename(name) === name ? name : null;
+  const items = Array.isArray(input.items) ? input.items.slice(0, 256).map(item => ({ path:safeText(item?.path,1000), status:['verified','modified','missing','untracked'].includes(item?.status)?item.status:'missing', expectedSha256:/^[a-f0-9]{64}$/i.test(String(item?.expectedSha256 ?? ''))?String(item.expectedSha256).toLowerCase():null, actualSha256:/^[a-f0-9]{64}$/i.test(String(item?.actualSha256 ?? ''))?String(item.actualSha256).toLowerCase():null, sizeBytes:safeCount(item?.sizeBytes), error:item?.error?safeText(item.error,300):null })) : [];
+  const summary = input.summary && typeof input.summary === 'object' ? input.summary : {};
+  return { schemaVersion:1, mode:'audit', available:Boolean(input.available), source:input.source==='local-manifest'?'local-manifest':'unavailable', startedAt:safeDate(input.startedAt), completedAt:safeDate(input.completedAt), manifestVersion:safeText(input.manifestVersion,120), manifestGeneratedAt:safeDate(input.manifestGeneratedAt), signature:{status:['present-unverified','not-configured','verified'].includes(input.signature?.status)?input.signature.status:'not-configured',algorithm:input.signature?.algorithm?safeText(input.signature.algorithm,80):null}, reportAvailable:Boolean(input.reportAvailable||fileName(input.jsonFile)), jsonFile:fileName(input.jsonFile), csvFile:fileName(input.csvFile), error:input.error?safeText(input.error,500):undefined, limitations:Array.isArray(input.limitations)?input.limitations.slice(0,8).map(item=>safeText(item,500)):[], summary:{total:safeCount(summary.total),verified:safeCount(summary.verified),modified:safeCount(summary.modified),missing:safeCount(summary.missing),untracked:safeCount(summary.untracked),healthy:Boolean(summary.healthy),truncated:Boolean(summary.truncated)}, items, enforcement:{mode:'audit',blocking:false,repairAvailable:false,serviceProtected:false} };
+}
+
+function sanitizeEdrProcess(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return { attributed:Boolean(input.attributed), pid:safeCount(input.pid), name:safeText(input.name,260), path:safeText(input.path,1000), parentPid:safeCount(input.parentPid), reason:safeText(input.reason,260) };
+}
+
+function sanitizeEdrResponse() {
+  return { mode:'audit', blocking:false, terminationAvailable:false, removalAvailable:false, quarantineAvailable:false };
+}
+
+function sanitizeRansomwareAudit(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    mode: 'audit', configured: Boolean(input.configured), enabled: Boolean(input.enabled), paused: Boolean(input.paused), blocking: false,
+    rootsConfigured: Math.min(8, safeCount(input.rootsConfigured)), rootsObserved: Math.min(8, safeCount(input.rootsObserved)),
+    degradedRoots: Math.min(8, safeCount(input.degradedRoots)), canariesActive: Math.min(8, safeCount(input.canariesActive)),
+    processAttribution: 'unavailable',
+    recentAlerts: Array.isArray(input.recentAlerts) ? input.recentAlerts.slice(0, 20).map(sanitizeRansomwareAlert) : []
+  };
+}
+
+function sanitizeRansomwareAlert(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    id: safeUuid(input.id), at: safeDate(input.at),
+    kind: ['canary-tamper', 'mass-extension-change', 'high-rate-deletion', 'high-rate-file-change'].includes(input.kind) ? input.kind : 'high-rate-file-change',
+    severity: ['medium', 'high', 'critical'].includes(input.severity) ? input.severity : 'medium',
+    mode: 'audit', rootLabel: safeLabel(input.rootLabel), fileName: safeLabel(input.fileName),
+    counts: { changed: safeCount(input.counts?.changed), deleted: safeCount(input.counts?.deleted), extensionChanges: safeCount(input.counts?.extensionChanges) },
+    process: { attributed: false, reason: 'La atribución por proceso requiere telemetría nativa.' },
+    action: 'observed-only', explanation: safeText(input.explanation, 500)
   };
 }
 
@@ -863,7 +1316,8 @@ function sanitizeScanReport(value, context) {
     results: Array.isArray(input.results)
       ? input.results.map(item => ({ ...sanitizeScanResult(item, context), scanId }))
       : [],
-    resultsTruncated: safeCount(input.resultsTruncated)
+    resultsTruncated: safeCount(input.resultsTruncated),
+    reportAvailable: Boolean(input.reportAvailable)
   };
 }
 
@@ -878,6 +1332,7 @@ function sanitizeScanResult(value, context) {
     sha256: typeof input.sha256 === 'string' && /^[0-9a-f]{64}$/i.test(input.sha256) ? input.sha256.toLowerCase() : null,
     score: safeScore(input.score),
     verdict: ['clean', 'suspicious', 'malicious', 'skipped', 'error'].includes(input.verdict) ? input.verdict : 'error',
+    classification: input.classification === 'pua' ? 'pua' : 'malware',
     findings: Array.isArray(input.findings) ? input.findings.slice(0, 100).map(finding => ({
       id: safeLabel(finding?.id),
       description: safeText(finding?.description, 500),
@@ -886,7 +1341,28 @@ function sanitizeScanResult(value, context) {
     durationMs: safeCount(input.durationMs),
     error: input.error ? 'No se pudo leer este archivo.' : undefined,
     action: ['quarantined', 'quarantine-error'].includes(input.action) ? input.action : undefined,
-    quarantineId: input.quarantineId ? safeUuid(input.quarantineId) : undefined
+    quarantineId: input.quarantineId ? safeUuid(input.quarantineId) : undefined,
+    trust: input.trust && typeof input.trust === 'object' ? {
+      status: safeLabel(input.trust.status),
+      subject: safeText(input.trust.subject, 500),
+      organization: safeText(input.trust.organization, 200),
+      isOsBinary: Boolean(input.trust.isOsBinary),
+      signatureType: safeLabel(input.trust.signatureType),
+      thumbprint: safeText(input.trust.thumbprint, 100),
+      notBefore: safeDate(input.trust.notBefore),
+      notAfter: safeDate(input.trust.notAfter),
+      chainValid: Boolean(input.trust.chainValid),
+      chainStatus: Array.isArray(input.trust.chainStatus) ? input.trust.chainStatus.slice(0, 16).map(value => safeLabel(value)) : [],
+      timestamped: Boolean(input.trust.timestamped),
+      timestampSubject: safeText(input.trust.timestampSubject, 500),
+      trustedPublisher: Boolean(input.trust.trustedPublisher),
+      applicationVerified: Boolean(input.trust.applicationVerified),
+      companyName: safeText(input.trust.companyName, 200),
+      productName: safeText(input.trust.productName, 200),
+      fileVersion: safeText(input.trust.fileVersion, 100),
+      zoneId: Number.isSafeInteger(input.trust.zoneId) ? input.trust.zoneId : null,
+      origin: ['windows', 'program-files', 'program-files-x86', 'installed-user-application', 'other'].includes(input.trust.origin) ? input.trust.origin : 'other'
+    } : undefined
   };
 }
 
@@ -904,6 +1380,43 @@ function sanitizeSummary(value) {
     linksSkipped: safeCount(input.linksSkipped),
     rootsScanned: safeCount(input.rootsScanned),
     durationMs: safeCount(input.durationMs)
+  };
+}
+
+function sanitizePerformance(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  const engine = input.engine && typeof input.engine === 'object' ? input.engine : {};
+  const protection = input.protection && typeof input.protection === 'object' ? input.protection : {};
+  const monitor = input.monitor && typeof input.monitor === 'object' ? input.monitor : {};
+  const runtime = input.runtime && typeof input.runtime === 'object' ? input.runtime : {};
+  const queueMetrics = source => ({
+    active: Boolean(source.active),
+    pendingEvents: safeCount(source.pendingEvents),
+    queueDepth: safeCount(source.queueDepth),
+    queueLimit: safeCount(source.queueLimit),
+    eventsReceived: safeCount(source.eventsReceived),
+    eventsCoalesced: safeCount(source.eventsCoalesced),
+    eventsDropped: safeCount(source.eventsDropped),
+    filesInspected: safeCount(source.filesInspected),
+    peakPendingEvents: safeCount(source.peakPendingEvents),
+    peakQueueDepth: safeCount(source.peakQueueDepth)
+  });
+  return {
+    engine: {
+      fileScans: safeCount(engine.fileScans),
+      cacheHits: safeCount(engine.cacheHits),
+      cacheMisses: safeCount(engine.cacheMisses),
+      cacheEntries: safeCount(engine.cacheEntries),
+      cacheMaxEntries: safeCount(engine.cacheMaxEntries),
+      bytesRead: safeCount(engine.bytesRead),
+      peakWorkingBufferBytes: safeCount(engine.peakWorkingBufferBytes)
+    },
+    protection: queueMetrics(protection),
+    monitor: queueMetrics(monitor),
+    runtime: {
+      rssBytes: safeCount(runtime.rssBytes),
+      heapUsedBytes: safeCount(runtime.heapUsedBytes)
+    }
   };
 }
 
@@ -954,7 +1467,14 @@ function sanitizeSettings(value) {
     notifications: input.notifications !== false,
     checkUpdates: input.checkUpdates !== false,
     updateChannel: ['stable', 'beta'].includes(input.updateChannel) ? input.updateChannel : 'stable',
-    launchAtStartup: input.launchAtStartup !== false
+    launchAtStartup: input.launchAtStartup !== false,
+    scheduledScanEnabled: Boolean(input.scheduledScanEnabled),
+    scheduledScanMode: input.scheduledScanMode === 'full' ? 'full' : 'quick',
+    scheduledScanHour: Number.isSafeInteger(input.scheduledScanHour) && input.scheduledScanHour >= 0 && input.scheduledScanHour <= 23 ? input.scheduledScanHour : 3,
+    skipScheduledScanOnBattery: input.skipScheduledScanOnBattery !== false,
+    ransomwareAuditEnabled: Boolean(input.ransomwareAuditEnabled),
+    networkProtectionMode: input.networkProtectionMode === 'block' ? 'block' : 'audit',
+    reputationSharingEnabled: Boolean(input.reputationSharingEnabled)
   };
 }
 
@@ -965,11 +1485,11 @@ function sanitizeActivity(value) {
   const displayPath = compactPath(input.path);
   return {
     type,
-    kind: type === 'restore' ? 'quarantine' : type.startsWith('monitor') || type.startsWith('protection') ? 'monitor' : 'scan',
-    title: type === 'restore' ? 'Archivo restaurado' : type.startsWith('monitor') || type.startsWith('protection') ? 'Detección de vigilancia' : 'Análisis completado',
+    kind: type === 'restore' ? 'quarantine' : type === 'ransomware-audit' || type.startsWith('monitor') || type.startsWith('protection') ? 'monitor' : 'scan',
+    title: type === 'restore' ? 'Archivo restaurado' : type === 'threat-intel-lookup' ? 'Consulta de inteligencia' : type === 'ransomware-audit' ? 'Alerta ransomware en auditoría' : type.startsWith('monitor') || type.startsWith('protection') ? 'Detección de vigilancia' : 'Análisis completado',
     description: summary
       ? `${summary.scanned} archivos · ${summary.malicious + summary.suspicious} indicios`
-      : displayPath || 'Actividad de Aegis',
+      : type === 'threat-intel-lookup' ? `${safeLabel(input.verdict) || 'Resultado no concluyente'} · solo SHA-256` : type === 'ransomware-audit' ? `${safeLabel(input.rootLabel)} · sin bloqueo automático` : displayPath || 'Actividad de Aegis',
     at: safeDate(input.at),
     path: displayPath,
     verdict: ['clean', 'suspicious', 'malicious', 'skipped', 'error'].includes(input.verdict) ? input.verdict : undefined,
@@ -1144,6 +1664,7 @@ class EngineBridge {
     this.readyResolve = null;
     this.readyReject = null;
     this.disposed = false;
+    this.authKey = crypto.randomBytes(32).toString('base64');
   }
 
   async start(options) {
@@ -1157,7 +1678,10 @@ class EngineBridge {
     }, 15_000);
     this.ready.finally(() => clearTimeout(readinessTimeout)).catch(() => {});
 
-    this.child = utilityProcess.fork(WORKER_FILE, [], { serviceName: 'Aegis Guard Scan Engine' });
+    this.child = utilityProcess.fork(WORKER_FILE, [], {
+      serviceName: 'Aegis Guard Scan Engine',
+      env: { ...process.env, AEGIS_WORKER_AUTH_KEY: this.authKey }
+    });
     this.child.on('message', message => this.handleMessage(message?.data ?? message));
     this.child.on('exit', code => this.handleExit(code));
     this.child.on('error', error => this.handleFailure(error));
@@ -1182,7 +1706,7 @@ class EngineBridge {
       }
       this.pending.set(id, { resolve, reject, timeout });
       try {
-        this.child.postMessage({ kind: 'request', id, action, payload });
+        this.child.postMessage(signWorkerMessage({ kind: 'request', id, action, payload }, this.authKey));
       } catch (error) {
         if (timeout) clearTimeout(timeout);
         this.pending.delete(id);
@@ -1192,7 +1716,11 @@ class EngineBridge {
   }
 
   handleMessage(message) {
-    if (!message || typeof message !== 'object') return;
+    message = verifyWorkerMessage(message, this.authKey);
+    if (!message) {
+      this.handleFailure(operationError('WORKER_AUTH_FAILED', 'The scan worker sent an unauthenticated message'));
+      return;
+    }
     if (message.kind === 'ready') {
       if (message.protocolVersion !== WORKER_PROTOCOL_VERSION) {
         this.readyReject?.(operationError('WORKER_PROTOCOL', 'Incompatible scan worker protocol'));

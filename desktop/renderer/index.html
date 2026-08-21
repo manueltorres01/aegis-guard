@@ -51,6 +51,19 @@
         <button class="nav-item" type="button" data-view="protection">
           <svg aria-hidden="true"><use href="#i-radar"/></svg><span>Protección</span>
         </button>
+        <button class="nav-item" type="button" data-view="network">
+          <svg aria-hidden="true"><use href="#i-radar"/></svg><span>Red</span>
+        </button>
+        <button class="nav-item" type="button" data-view="incidents">
+          <svg aria-hidden="true"><use href="#i-alert"/></svg><span>Incidentes</span>
+          <span class="nav-badge" id="edr-badge" hidden>0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="exposure">
+          <svg aria-hidden="true"><use href="#i-info"/></svg><span>Exposición</span>
+        </button>
+        <button class="nav-item" type="button" data-view="integrity">
+          <svg aria-hidden="true"><use href="#i-shield"/></svg><span>Integridad</span>
+        </button>
         <button class="nav-item" type="button" data-view="results">
           <svg aria-hidden="true"><use href="#i-results"/></svg><span>Resultados</span>
           <span class="nav-badge" id="results-badge" hidden>0</span>
@@ -236,6 +249,21 @@
             </div>
           </article>
 
+          <article class="card manual-monitor-card" aria-labelledby="ransomware-audit-title">
+            <div class="manual-monitor-intro">
+              <span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-shield"/></svg></span>
+              <div>
+                <p class="overline" id="ransomware-audit-overline">Modo auditoría</p>
+                <h3 id="ransomware-audit-title">Protección frente a ransomware</h3>
+                <p id="ransomware-audit-description">Desactivada. Puedes habilitarla en Ajustes para observar cambios anómalos sin bloquear procesos.</p>
+              </div>
+            </div>
+            <div class="manual-monitor-controls">
+              <div class="target-display"><svg aria-hidden="true"><use href="#i-results"/></svg><span id="ransomware-audit-roots">0 carpetas observadas</span><span class="target-scope">Sin bloqueo</span></div>
+              <p class="muted-copy" id="ransomware-audit-alert">No hay alertas de auditoría recientes.</p>
+            </div>
+          </article>
+
           <article class="card manual-monitor-card" aria-labelledby="manual-monitor-title">
             <div class="manual-monitor-intro">
               <span class="choice-icon violet"><svg aria-hidden="true"><use href="#i-folder"/></svg></span>
@@ -265,12 +293,71 @@
           </div>
         </section>
 
+        <section class="view" id="view-network" data-title="Red" data-eyebrow="Auditoría local" aria-labelledby="network-heading" hidden>
+          <div class="section-heading page-heading table-heading">
+            <div><h2 id="network-heading">Visibilidad de red</h2><p id="network-summary">Realiza una captura para atribuir conexiones salientes a sus procesos.</p></div>
+            <div class="button-row"><button class="button primary" id="run-network-audit" type="button">Auditar ahora</button><button class="button secondary" id="export-network-json" type="button" disabled>JSON</button><button class="button secondary" id="export-network-csv" type="button" disabled>CSV</button></div>
+          </div>
+          <aside class="info-banner"><svg aria-hidden="true"><use href="#i-info"/></svg><p><strong>Modo auditoría por defecto.</strong> Aegis observa y explica conexiones. El bloqueo de indicadores requiere activarlo explícitamente y aplicar las reglas; siempre es reversible y no sustituye el Firewall de Windows. La mitigación DDoS volumétrica corresponde al router, ISP o proveedor de infraestructura.</p></aside>
+          <article class="card network-policy-card">
+            <div class="settings-card-title"><span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Protección de indicadores</h3><p>Las reglas de IP se crean en el Firewall de Windows con un grupo propio para poder retirarlas sin afectar otras reglas.</p></div></div>
+            <div class="network-policy-controls"><label class="field-label" for="network-protection-mode">Modo</label><select id="network-protection-mode"><option value="audit">Solo auditoría</option><option value="block">Bloqueo reversible</option></select><button class="button primary" id="apply-network-protection" type="button" disabled>Aplicar bloqueo</button><button class="button secondary" id="remove-network-protection" type="button" disabled>Retirar reglas</button><span class="soft-status" id="network-protection-status">Auditoría activa</span></div>
+          </article>
+          <div class="fact-grid">
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-shield"/></svg><div><strong id="network-firewall-state">Firewall sin comprobar</strong><p>Perfiles de Firewall de Windows activos.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-shield"/></svg><div><strong id="network-defender-state">Defender sin comprobar</strong><p>Antivirus y protección en tiempo real.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-results"/></svg><div><strong id="network-event-count">0 conexiones</strong><p id="network-alert-count">0 coincidencias con indicadores.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-alert"/></svg><div><strong id="network-anomaly-summary">0 patrones anómalos</strong><p>Revisión contextual, sin bloqueo automático.</p></div></article>
+          </div>
+          <article class="card data-card"><div class="table-scroll"><table><thead><tr><th>Estado</th><th>Destino</th><th>Proceso</th><th>Firma</th><th>Explicación</th></tr></thead><tbody id="network-body"></tbody></table></div><div class="table-empty" id="network-empty"><span class="empty-icon"><svg aria-hidden="true"><use href="#i-radar"/></svg></span><h3>Sin captura de red</h3><p>Pulsa «Auditar ahora» para tomar una instantánea local.</p></div></article>
+        </section>
+
+        <section class="view" id="view-incidents" data-title="Incidentes" data-eyebrow="Auditoría EDR local" aria-labelledby="edr-heading" hidden>
+          <div class="section-heading page-heading table-heading">
+            <div><h2 id="edr-heading">Incidentes y persistencia</h2><p id="edr-summary">Toma una instantánea local para revisar procesos, árbol de procesos y puntos de inicio.</p></div>
+            <div class="button-row"><button class="button primary" id="run-edr-audit" type="button">Auditar ahora</button><button class="button secondary" id="export-edr-report" type="button" disabled>Descargar JSON</button></div>
+          </div>
+          <aside class="info-banner"><svg aria-hidden="true"><use href="#i-info"/></svg><p><strong>Modo auditoría, sin bloqueo.</strong> Esta vista observa una instantánea de Windows, explica las coincidencias y las etiqueta con MITRE ATT&amp;CK. No termina procesos, no elimina persistencias y no atribuye escrituras de archivos sin telemetría nativa.</p></aside>
+          <div class="fact-grid">
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-results"/></svg><div><strong id="edr-process-count">0 procesos</strong><p id="edr-tree-count">0 relaciones padre-hijo</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-vault"/></svg><div><strong id="edr-persistence-count">0 persistencias</strong><p>Run keys, tareas y servicios observados.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-alert"/></svg><div><strong id="edr-incident-count">0 incidentes</strong><p id="edr-suspicious-count">0 indicios requieren revisión.</p></div></article>
+          </div>
+          <article class="card data-card"><div class="table-scroll"><table><thead><tr><th>Estado</th><th>Tipo</th><th>Proceso o artefacto</th><th>MITRE ATT&amp;CK</th><th>Explicación</th></tr></thead><tbody id="edr-body"></tbody></table></div><div class="table-empty" id="edr-empty"><span class="empty-icon"><svg aria-hidden="true"><use href="#i-alert"/></svg></span><h3>Sin instantánea EDR</h3><p>Pulsa «Auditar ahora» para recopilar datos acotados de forma local.</p></div></article>
+          <aside class="info-banner warning-soft" id="edr-limitations" hidden><svg aria-hidden="true"><use href="#i-info"/></svg><p id="edr-limitations-copy"></p></aside>
+        </section>
+
+        <section class="view" id="view-exposure" data-title="Exposición" data-eyebrow="Inventario del dispositivo" aria-labelledby="exposure-heading" hidden>
+          <div class="section-heading page-heading table-heading">
+            <div><h2 id="exposure-heading">Exposición del dispositivo</h2><p id="exposure-summary">Toma una instantánea local de medios extraíbles, aplicaciones y ajustes de seguridad.</p></div>
+            <div class="button-row"><button class="button primary" id="run-exposure-audit" type="button">Auditar ahora</button><button class="button secondary" id="export-exposure-json" type="button" disabled>JSON</button><button class="button secondary" id="export-exposure-csv" type="button" disabled>CSV</button></div>
+          </div>
+          <aside class="info-banner"><svg aria-hidden="true"><use href="#i-info"/></svg><p><strong>Auditoría de solo lectura.</strong> Aegis inventaría volúmenes extraíbles y aplicaciones, revisa defensas de Windows y muestra el consentimiento de cámara y micrófono. No bloquea USB, no desinstala aplicaciones ni cambia la privacidad.</p></aside>
+          <article class="card exposure-policy-card"><div class="settings-card-title"><span class="choice-icon violet"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Políticas locales de aplicaciones</h3><p id="exposure-policy-status">Sin indicadores locales configurados; el inventario es informativo.</p></div></div><span class="soft-status" id="exposure-policy-expired">0 excepciones caducadas</span></article>
+          <div class="fact-grid">
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-vault"/></svg><div><strong id="exposure-device-count">0 medios extraíbles</strong><p>Volúmenes observados por Windows.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-results"/></svg><div><strong id="exposure-app-count">0 aplicaciones</strong><p id="exposure-app-meta">Inventario local sin decisión automática.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-alert"/></svg><div><strong id="exposure-setting-count">0 ajustes</strong><p>Defensas o configuraciones que requieren revisión.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-info"/></svg><div><strong id="exposure-privacy-count">0 permisos</strong><p>Consentimientos de cámara y micrófono.</p></div></article>
+          </div>
+          <article class="card data-card"><div class="table-scroll"><table><thead><tr><th>Tipo</th><th>Elemento</th><th>Detalle</th><th>Estado</th><th>Ruta/Editor</th></tr></thead><tbody id="exposure-body"></tbody></table></div><div class="table-empty" id="exposure-empty"><span class="empty-icon"><svg aria-hidden="true"><use href="#i-info"/></svg></span><h3>Sin inventario de exposición</h3><p>Pulsa «Auditar ahora» para recopilar una instantánea local.</p></div></article>
+          <aside class="info-banner warning-soft" id="exposure-limitations" hidden><svg aria-hidden="true"><use href="#i-info"/></svg><p id="exposure-limitations-copy"></p></aside>
+        </section>
+
         <section class="view" id="view-results" data-title="Resultados" data-eyebrow="Historial de análisis" aria-labelledby="results-heading" hidden>
           <div class="section-heading page-heading table-heading">
             <div><h2 id="results-heading">Resultados</h2><p id="results-summary">Todavía no hay análisis registrados.</p></div>
-            <div class="filter-group" aria-label="Filtrar resultados">
-              <button class="filter-button is-selected" type="button" data-filter="all" aria-pressed="true">Todos</button>
-              <button class="filter-button" type="button" data-filter="attention" aria-pressed="false">Requieren atención</button>
+            <div class="results-controls">
+              <div class="filter-group" aria-label="Filtrar resultados">
+                <button class="filter-button is-selected" type="button" data-filter="all" aria-pressed="true">Todo</button>
+                <button class="filter-button" type="button" data-filter="suspicious" aria-pressed="false">Sospechoso</button>
+                <button class="filter-button" type="button" data-filter="not-scanned" aria-pressed="false">No analizado</button>
+                <button class="filter-button" type="button" data-filter="malicious" aria-pressed="false">Malicioso</button>
+              </div>
+              <div class="button-row compact-row">
+                <button class="button secondary compact" id="export-report-json" type="button">Descargar JSON</button>
+                <button class="button secondary compact" id="export-report-csv" type="button">Descargar CSV</button>
+              </div>
             </div>
           </div>
           <article class="card data-card">
@@ -296,7 +383,7 @@
           </div>
           <aside class="info-banner warning-soft">
             <svg aria-hidden="true"><use href="#i-info"/></svg>
-            <p>Restaurar devuelve el archivo a una ubicación que tú elijas. Hazlo solo si confías en él.</p>
+            <p>Restaurar devuelve el archivo a su ubicación original. Hazlo solo si confías en él.</p>
           </aside>
           <aside class="info-banner warning-soft" id="quarantine-inventory-warning" role="status" hidden>
             <svg aria-hidden="true"><use href="#i-alert"/></svg>
@@ -315,6 +402,22 @@
               <p>Los elementos aislados aparecerán aquí.</p>
             </div>
           </article>
+        </section>
+
+        <section class="view" id="view-integrity" data-title="Integridad" data-eyebrow="Autoprotección local" aria-labelledby="integrity-heading" hidden>
+          <div class="section-heading page-heading table-heading">
+            <div><h2 id="integrity-heading">Integridad y autoprotección</h2><p id="integrity-summary">Comprueba que los archivos que toman decisiones de seguridad coinciden con la línea base del empaquetado.</p></div>
+            <div class="button-row"><button class="button primary" id="run-integrity-audit" type="button">Comprobar ahora</button><button class="button secondary" id="export-integrity-json" type="button" disabled>JSON</button><button class="button secondary" id="export-integrity-csv" type="button" disabled>CSV</button></div>
+          </div>
+          <aside class="info-banner"><svg aria-hidden="true"><use href="#i-info"/></svg><p><strong>Modo auditoría.</strong> La comprobación detecta archivos modificados, ausentes o sin línea base. No repara ni bloquea automáticamente; la protección de nivel servicio y kernel requiere una instalación firmada y permisos mínimos.</p></aside>
+          <article class="card integrity-status-card"><div class="settings-card-title"><span class="choice-icon green"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3 id="integrity-status-title">Sin comprobación</h3><p id="integrity-status-copy">La línea base local se genera durante el empaquetado y no es una raíz de confianza del sistema.</p></div></div><span class="soft-status" id="integrity-signature-status">Firma no configurada</span></article>
+          <div class="fact-grid">
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-results"/></svg><div><strong id="integrity-total-count">0 archivos</strong><p>Componentes comprobados.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-shield"/></svg><div><strong id="integrity-verified-count">0 verificados</strong><p>Coinciden con la línea base.</p></div></article>
+            <article class="card fact-card"><svg aria-hidden="true"><use href="#i-alert"/></svg><div><strong id="integrity-modified-count">0 cambios</strong><p id="integrity-missing-copy">0 ausentes · 0 sin línea base.</p></div></article>
+          </div>
+          <article class="card data-card"><div class="table-scroll"><table><thead><tr><th>Estado</th><th>Archivo</th><th>SHA-256 esperado</th><th>SHA-256 actual</th><th>Tamaño</th></tr></thead><tbody id="integrity-body"></tbody></table></div><div class="table-empty" id="integrity-empty"><span class="empty-icon"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><h3>Sin auditoría de integridad</h3><p>Pulsa «Comprobar ahora» para revisar los componentes locales.</p></div></article>
+          <aside class="info-banner warning-soft" id="integrity-limitations" hidden><svg aria-hidden="true"><use href="#i-info"/></svg><p id="integrity-limitations-copy"></p></aside>
         </section>
 
         <section class="view" id="view-settings" data-title="Ajustes" data-eyebrow="Preferencias" aria-labelledby="settings-heading" hidden>
@@ -343,12 +446,33 @@
               </article>
 
               <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Auditoría de ransomware</h3><p>Observa cambios rápidos, borrados, extensiones añadidas y documentos señuelo.</p></div></div>
+                <label class="toggle-row" for="ransomware-audit-enabled">
+                  <span><strong>Activar modo auditoría</strong><small>No bloquea procesos ni atribuye autores en esta versión. Crea un canario identificable en cada carpeta observada.</small></span>
+                  <input id="ransomware-audit-enabled" type="checkbox" role="switch">
+                  <span class="toggle" aria-hidden="true"></span>
+                </label>
+              </article>
+
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon blue"><svg aria-hidden="true"><use href="#i-info"/></svg></span><div><h3>Reputación opcional</h3><p>Las consultas manuales envían únicamente el SHA-256 a las fuentes habilitadas; nunca suben el archivo ni revelan su ruta.</p></div></div>
+                <label class="toggle-row" for="reputation-sharing-enabled"><span><strong>Permitir consultas de reputación</strong><small>Desactivado por defecto. Actívalo para usar el botón «Reputación» en Resultados.</small></span><input id="reputation-sharing-enabled" type="checkbox" role="switch"><span class="toggle" aria-hidden="true"></span></label>
+              </article>
+
+              <article class="card settings-card">
                 <div class="settings-card-title"><span class="choice-icon green"><svg aria-hidden="true"><use href="#i-play"/></svg></span><div><h3>Inicio de Windows</h3><p>Controla si Aegis se abre al iniciar tu sesión de Windows.</p></div></div>
                 <label class="toggle-row" for="start-with-windows">
                   <span><strong>Iniciar con Windows</strong><small id="startup-setting-note">Permite que Aegis active la protección de Descargas al comenzar cada sesión. Activado por defecto.</small></span>
                   <input id="start-with-windows" type="checkbox" role="switch" checked>
                   <span class="toggle" aria-hidden="true"></span>
                 </label>
+              </article>
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon blue"><svg aria-hidden="true"><use href="#i-clock"/></svg></span><div><h3>Análisis programado</h3><p>Se ejecuta mientras Aegis permanece activo en segundo plano.</p></div></div>
+                <label class="toggle-row" for="scheduled-scan-enabled"><span><strong>Activar programación diaria</strong><small>Desactivada por defecto.</small></span><input id="scheduled-scan-enabled" type="checkbox" role="switch"><span class="toggle" aria-hidden="true"></span></label>
+                <label class="field-label" for="scheduled-scan-mode">Tipo</label><select id="scheduled-scan-mode"><option value="quick">Rápido</option><option value="full">Completo</option></select>
+                <label class="field-label" for="scheduled-scan-hour">Hora</label><select id="scheduled-scan-hour"></select>
+                <label class="toggle-row" for="scheduled-scan-battery"><span><strong>Omitir usando batería</strong><small>Evita iniciar el análisis sin alimentación externa.</small></span><input id="scheduled-scan-battery" type="checkbox" role="switch" checked><span class="toggle" aria-hidden="true"></span></label>
               </article>
             </div>
 
@@ -364,10 +488,33 @@
                 <button class="button primary full-width" id="restart-update" type="button" hidden>Reiniciar y actualizar</button>
                 <p class="update-status" id="update-status" role="status"></p>
               </article>
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-refresh"/></svg></span><div><h3>Definiciones de detección</h3><p id="definition-update-copy">Las definiciones se cargan desde el paquete instalado hasta validar un paquete firmado.</p></div></div>
+                <dl class="version-list">
+                  <div><dt>Versión activa</dt><dd id="definition-update-version">—</dd></div>
+                  <div><dt>Origen</dt><dd id="definition-update-source">—</dd></div>
+                  <div><dt>Firma</dt><dd id="definition-update-signature">—</dd></div>
+                </dl>
+                <button class="button secondary full-width" id="import-definition-bundle" type="button">Importar paquete firmado</button>
+                <button class="button secondary full-width" id="check-definition-feed" type="button">Buscar definiciones ahora</button>
+                <button class="button secondary full-width" id="rollback-definitions" type="button" hidden>Restaurar definición anterior</button>
+                <p class="update-status" id="definition-update-status" role="status"></p>
+              </article>
 
               <article class="card settings-card test-card">
                 <div class="settings-card-title"><span class="choice-icon amber"><svg aria-hidden="true"><use href="#i-play"/></svg></span><div><h3>Prueba segura</h3><p>Crea un archivo de texto inofensivo para verificar detección y cuarentena. No contiene código ejecutable.</p></div></div>
                 <button class="button secondary full-width" id="run-simulation" type="button">Ejecutar simulación inofensiva</button>
+              </article>
+              <article class="card settings-card">
+                <div class="settings-card-title"><span class="choice-icon green"><svg aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Diagnóstico de protección</h3><p id="health-summary">Comprobando componentes internos.</p></div></div>
+                <dl class="version-list">
+                  <div><dt>IPC del motor</dt><dd id="health-ipc">—</dd></div>
+                  <div><dt>Vigilancia</dt><dd id="health-protection">—</dd></div>
+                  <div><dt>Persistencia</dt><dd id="health-persistence">—</dd></div>
+                  <div><dt>Auditoría ransomware</dt><dd id="health-ransomware">—</dd></div>
+                  <div><dt>Autoprotección</dt><dd id="health-self-protection">—</dd></div>
+                  <div><dt>Rendimiento</dt><dd id="health-performance">—</dd></div>
+                </dl>
               </article>
             </div>
           </div>
@@ -388,10 +535,10 @@
   <dialog id="restore-dialog" aria-labelledby="restore-dialog-title">
     <div class="dialog-icon"><svg aria-hidden="true"><use href="#i-vault"/></svg></div>
     <h2 id="restore-dialog-title">¿Restaurar este archivo?</h2>
-    <p id="restore-dialog-copy">Elige una ubicación segura y analiza el archivo con Microsoft Defender antes de abrirlo.</p>
+    <p id="restore-dialog-copy">Se devolverá a su ubicación original. Aegis no sobrescribirá otro archivo que ya exista allí.</p>
     <div class="dialog-actions">
       <button class="button secondary" id="restore-cancel" type="button">Cancelar</button>
-      <button class="button primary" id="restore-confirm" type="button">Elegir ubicación y restaurar</button>
+      <button class="button primary" id="restore-confirm" type="button">Restaurar en ubicación original</button>
     </div>
   </dialog>
 

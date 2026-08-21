@@ -4,10 +4,14 @@ import path from 'node:path';
 import {
   ContractError,
   WORKER_ACTIONS,
+  parseDefinitionFeedCheck,
+  parseExportReport,
+  parseDefinitionBundle,
   parseIsolateResult,
   parseMonitorStart,
   parseSettings,
   parseStartScan,
+  parseThreatIntelQuery,
   parseWorkerActionPayload,
   parseWorkerInitialization
 } from '../desktop/ipc-contracts.mjs';
@@ -78,6 +82,43 @@ test('settings contract accepts only a boolean launchAtStartup value', () => {
   assert.throws(() => parseSettings({ launchAtStartup: 'true' }), ContractError);
 });
 
+test('scheduled scan settings are bounded and battery-safe', () => {
+  assert.deepEqual(parseSettings({scheduledScanEnabled:true,scheduledScanMode:'full',scheduledScanHour:23,skipScheduledScanOnBattery:true}), {scheduledScanEnabled:true,scheduledScanMode:'full',scheduledScanHour:23,skipScheduledScanOnBattery:true});
+  assert.throws(() => parseSettings({scheduledScanMode:'deep'}), ContractError);
+  assert.throws(() => parseSettings({scheduledScanHour:24}), ContractError);
+  assert.throws(() => parseSettings({skipScheduledScanOnBattery:'yes'}), ContractError);
+});
+
+test('ransomware audit setting is an explicit boolean only', () => {
+  assert.deepEqual(parseSettings({ ransomwareAuditEnabled: true }), { ransomwareAuditEnabled: true });
+  assert.deepEqual(parseSettings({ ransomwareAuditEnabled: false }), { ransomwareAuditEnabled: false });
+  assert.throws(() => parseSettings({ ransomwareAuditEnabled: 'audit' }), ContractError);
+});
+
+test('report export contracts accept only JSON and CSV', () => {
+  assert.deepEqual(parseExportReport({ format: 'json' }), { format: 'json' });
+  assert.deepEqual(parseWorkerActionPayload(WORKER_ACTIONS.getLatestReport, { format: 'csv' }), { format: 'csv' });
+  assert.throws(() => parseExportReport({ format: 'html' }), ContractError);
+  assert.throws(() => parseExportReport({ format: 'json', path: 'C:\\outside.json' }), ContractError);
+});
+
+test('definition bundle contract accepts bounded canonical base64 only', () => {
+  const payloadBase64 = Buffer.from('{}').toString('base64');
+  const signatureBase64 = Buffer.alloc(64, 1).toString('base64');
+  assert.deepEqual(parseDefinitionBundle({ schemaVersion: 1, keyId: 'release-1', payloadBase64, signatureBase64 }), { schemaVersion: 1, keyId: 'release-1', payloadBase64, signatureBase64 });
+  assert.deepEqual(parseWorkerActionPayload(WORKER_ACTIONS.applyDefinitionBundle, { keyId: 'release-1', payloadBase64, signatureBase64 }).schemaVersion, 1);
+  assert.throws(() => parseDefinitionBundle({ keyId: 'release-1', payloadBase64: 'not-base64', signatureBase64 }), ContractError);
+  assert.throws(() => parseDefinitionBundle({ keyId: '../release', payloadBase64, signatureBase64 }), ContractError);
+});
+
+test('definition feed contract accepts only the bounded force flag', () => {
+  assert.deepEqual(parseDefinitionFeedCheck(), { force: false });
+  assert.deepEqual(parseDefinitionFeedCheck({ force: true }), { force: true });
+  assert.deepEqual(parseWorkerActionPayload(WORKER_ACTIONS.checkDefinitionFeed, {}), { force: false });
+  assert.throws(() => parseDefinitionFeedCheck({ force: 'yes' }), ContractError);
+  assert.throws(() => parseDefinitionFeedCheck({ url: 'https://updates.example.test/feed.json' }), ContractError);
+});
+
 test('monitor and manual quarantine contracts require strict opaque identifiers', () => {
   assert.deepEqual(parseMonitorStart({ targetId, autoQuarantine: false }), { targetId, autoQuarantine: false });
   assert.deepEqual(parseIsolateResult({ scanId: targetId, resultId }), { scanId: targetId, resultId });
@@ -85,15 +126,37 @@ test('monitor and manual quarantine contracts require strict opaque identifiers'
   assert.throws(() => parseIsolateResult({ scanId: targetId, resultId, path: 'C:\\Windows\\system.ini' }), ContractError);
 });
 
+test('threat intelligence contracts accept only a SHA-256 and bounded force flag', () => {
+  const sha256 = 'A'.repeat(64);
+  assert.deepEqual(parseThreatIntelQuery({ sha256, force: true }), { sha256: sha256.toLowerCase(), force: true });
+  assert.deepEqual(parseWorkerActionPayload(WORKER_ACTIONS.queryThreatIntel, { sha256 }), { sha256: sha256.toLowerCase(), force: false });
+  assert.throws(() => parseThreatIntelQuery({ sha256: 'not-a-hash' }), ContractError);
+  assert.throws(() => parseThreatIntelQuery({ sha256, path: 'C:\\Windows' }), ContractError);
+  assert.throws(() => parseThreatIntelQuery({ sha256, force: 'yes' }), ContractError);
+});
+
 test('worker initialization requires absolute internal paths and a canonical 32-byte key', () => {
   const key = Buffer.alloc(32, 7).toString('base64');
+  const baseDirectory = path.resolve('Aegis');
+  const dataDirectory = path.resolve('Aegis', 'data');
+  const downloadsDirectory = path.resolve('Users', 'Demo', 'Downloads');
   const parsed = parseWorkerInitialization({
-    baseDirectory: 'C:\\Aegis',
-    dataDirectory: 'C:\\Users\\Demo\\AppData\\Local\\Aegis',
-    downloadsDirectory: 'C:\\Users\\Demo\\Downloads',
+    baseDirectory,
+    dataDirectory,
+    downloadsDirectory,
     quarantineKeyBase64: key
   });
   assert.equal(parsed.quarantineKeyBase64, key);
+  assert.deepEqual(parsed.protectedDirectories, []);
+  const protectedDirectory = path.resolve('Users', 'Demo', 'Documents');
+  assert.deepEqual(parseWorkerInitialization({
+    baseDirectory: path.resolve('Aegis'), dataDirectory: path.resolve('Data'), downloadsDirectory: path.resolve('Downloads'),
+    protectedDirectories: [protectedDirectory], quarantineKeyBase64: key
+  }).protectedDirectories, [protectedDirectory]);
+  assert.throws(() => parseWorkerInitialization({
+    baseDirectory: 'C:\\Aegis', dataDirectory: 'C:\\Data', downloadsDirectory: 'C:\\Downloads',
+    protectedDirectories: ['relative'], quarantineKeyBase64: key
+  }), ContractError);
   assert.throws(() => parseWorkerInitialization({
     baseDirectory: '.', dataDirectory: 'data', downloadsDirectory: 'downloads', quarantineKeyBase64: key
   }), ContractError);
