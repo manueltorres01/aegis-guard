@@ -25,7 +25,7 @@ El proyecto no incluye el wrapper de Gradle; el workflow de GitHub Actions insta
 
 ## Descargar el APK desde GitHub
 
-El workflow `Android release APK` compila automáticamente `app-release-unsigned.apk` en Ubuntu cuando cambian estos archivos. En GitHub, abre la ejecución completada de **Actions → Android release APK** y descarga el artefacto `aegis-guard-android-release-unsigned`. Es un APK release sin firma comercial; Android puede pedir confirmación para instalarlo desde fuera de Play Store.
+El workflow `Android release APK` compila automáticamente `app-release.apk` en Ubuntu cuando cambian estos archivos. En GitHub, abre la ejecución completada de **Actions → Android release APK** y descarga el artefacto `aegis-guard-android-release-test-signed`. Está firmado con la clave de depuración estándar para poder instalarlo en un dispositivo de pruebas; no es una firma comercial ni debe publicarse en Play Store.
 
 ## Siguiente fase
 

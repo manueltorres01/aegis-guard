@@ -19,6 +19,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // GitHub's test artifact must be installable on a device. This is the
+            // standard debug key only; a production release needs a private signing key.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
