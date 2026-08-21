@@ -302,3 +302,24 @@ visible warning while any warning count is nonzero.
   destination picker and refuses to overwrite an existing file.
 - If compromise is plausible, follow [INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md)
   rather than relying on a single Aegis result.
+
+## Vista previa Linux (0.12.0)
+
+La CLI puede ejecutarse en Linux sobre una base Ubuntu LTS para analizar
+archivos, generar informes y usar la cuarentena cifrada. Ejecuta
+`npm run platform:linux` para obtener un informe JSON con la distribución,
+kernel, arquitectura, raíz predeterminada y capacidades reales del entorno.
+
+Esta primera fase es deliberadamente de auditoría: no instala un servicio
+`systemd`, no usa `fanotify`/eBPF, no cambia `nftables` y no bloquea procesos o
+tráfico. La interfaz Electron y las auditorías nativas de Windows siguen
+requiriendo Windows; Linux se ampliará después de validar privilegios,
+actualizaciones y recuperación.
+
+## Readiness para sustituir Defender (0.13.0)
+
+`npm run protection:readiness` genera un informe de puertas de seguridad. Hasta
+que existan binarios firmados, definiciones provisionadas, un servicio Windows
+de privilegios mínimos, telemetría continua, métricas de falsos positivos,
+auditoría independiente y soporte operativo, el resultado será
+`complementary-scanner` y Defender debe mantenerse activo.

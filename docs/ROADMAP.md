@@ -144,6 +144,34 @@ definitions:keygen` and `npm run definitions:bundle`. This exercises the complet
 verification and rollback path without pretending that a free public lookup is
 a complete malware database.
 
+## 0.12.0 — Linux portability foundation and analysis preview
+
+- Keep the scanner, encrypted quarantine, reports and policy identity model portable through an explicit platform adapter.
+- Add a headless Linux platform report with distribution, kernel, architecture, safe default root and capability boundaries.
+- Start with an Ubuntu LTS baseline and Node.js 20 or later; validate the preview in a dedicated Linux Actions job.
+- Expose Linux CLI status through `npm run platform:linux` without uploading paths, hashes or telemetry.
+- Keep Linux support read-only and reversible: no systemd service, fanotify/eBPF sensors, nftables changes or real-time enforcement are claimed.
+
+Implementation boundary: 0.12.0 proves that the portable engine and encrypted quarantine can be exercised from Linux userspace, but it is not a complete Linux antivirus. Native ELF/package-signature evidence, privilege separation, systemd lifecycle, fanotify/inotify monitoring and distribution packaging remain subsequent milestones. The Windows desktop and Windows-native audits remain unchanged.
+
+## 0.13.0 — Replacement-readiness gates
+
+- Make the replacement decision explicit instead of relying on a marketing claim.
+- Track signed installers, provisioned signed definitions, a least-privilege Windows service, continuous telemetry, performance evidence, corpus metrics, independent audit and incident support as separate gates.
+- Expose `npm run protection:readiness` for local and release checks; the default state remains `complementary-scanner` and keeps Microsoft Defender enabled.
+- Permit a future primary-endpoint candidate only when every gate has explicit evidence and rollback/recovery has been validated.
+
+Implementation boundary: 0.13.0 does not add kernel prevention or disable Defender. It records the missing evidence so the project can close the real security gaps in order. The next implementation milestone is an audit-only native Windows service contract, followed by signed telemetry and recovery testing; Linux native monitoring continues on its own track.
+
+## Android prototype track — after 0.13.0
+
+- Validate the mobile information architecture with a native Jetpack Compose test application.
+- Keep the first Android build simulated and permission-free: no real storage scan, deletion, network upload or process blocking.
+- Add real Android storage analysis only after explicit permission, battery, privacy and recovery tests are designed.
+- Treat Android as a separate platform adapter; Windows/Linux assumptions such as Authenticode, drive letters and system services do not carry over.
+
+Implementation boundary: `android-test/` is an interface prototype, not an Android antivirus. It must not be marketed as protection until Android package/signature analysis, Play/side-load threat modeling, background execution limits and a safe quarantine model have been independently validated.
+
 ## Parallel Linux migration track — 0.10.x to 1.1.x
 
 - Keep the scanning engine, definitions, reports, quarantine format and policy model portable through an OS adapter layer.

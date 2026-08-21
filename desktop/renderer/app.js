@@ -2236,8 +2236,8 @@ function createPreviewBridge() {
   return Object.freeze({
     async getBootstrap() {
       return {
-        app: { version: '0.11.0-preview' },
-        engine: { version: '0.11.0' },
+        app: { version: '0.13.0-preview' },
+        engine: { version: '0.13.0' },
         definitions: { version: '2026.08.18-local', updates: { currentVersion: 3, bundledVersion: 3, source: 'bundled', signature: { status: 'bundled', keyId: null }, rollbackAvailable: false, updateChannelConfigured: false, feed: { enabled: false, configured: false, due: false, inFlight: false } } },
         settings: previewSettings,
         protection: previewProtection,

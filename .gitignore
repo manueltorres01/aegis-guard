@@ -15,3 +15,6 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+android-test/.gradle/
+android-test/local.properties
+android-test/**/build/

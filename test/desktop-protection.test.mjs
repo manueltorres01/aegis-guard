@@ -175,15 +175,16 @@ test('pause restores a pending manual monitor unless it is stopped while paused'
   await service.init();
 
   const started = await service.startMonitor(monitoredDirectory, { autoQuarantine: false });
+  const canonicalMonitor = await fs.realpath(monitoredDirectory);
   assert.equal(started.active, true);
-  assert.equal(service.watchService.session.root, path.resolve(monitoredDirectory));
+  assert.equal(service.watchService.session.root, canonicalMonitor);
 
   await service.pauseProtection();
   assert.equal(service.watchService.session, null);
   assert.equal(service.manualMonitorConfig.target, path.resolve(monitoredDirectory));
 
   await service.resumeProtection();
-  assert.equal(service.watchService.session.root, path.resolve(monitoredDirectory));
+  assert.equal(service.watchService.session.root, canonicalMonitor);
 
   await service.pauseProtection();
   const stopped = await service.stopMonitor();
@@ -259,9 +260,9 @@ test('full scan aggregates only injected temporary roots and traversal failures'
   assert.equal(report.summary.errors, 0);
   assert.equal(report.summary.traversalErrors, 1);
   assert.equal(report.summary.quarantined, 0);
-  assert.equal(report.results.length, 1);
-  assert.equal(report.results[0].path, simulation);
-  assert.equal(report.results[0].verdict, 'malicious');
+  assert.equal(report.results.length, 2);
+  assert.ok(report.results.some(result => result.path === simulation && result.verdict === 'malicious'));
+  assert.ok(report.results.some(result => result.verdict === 'error' && result.detailType === 'traversal-error'));
   assert.equal(report.results.some(result => result.path === excludedSimulation), false);
   assert.ok(events.some(event => event.type === 'scan-traversal-error'));
   assert.ok(events.some(event =>

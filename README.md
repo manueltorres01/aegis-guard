@@ -27,11 +27,14 @@ Aegis Guard is an auditable malware-scanning MVP for Windows with both a command
 - Real-time directory monitoring on supported Node.js/Windows versions
 - Machine-readable JSON reports and automation-friendly exit codes
 - A completely harmless built-in malware simulation
+- Linux headless analysis preview with explicit platform capabilities and limitations
+- Replacement-readiness report that keeps Defender enabled until every security gate is evidenced
 - Dependency-free core engine; Electron is only required for the desktop application
 
 ## Requirements
 
-- Windows 10 or 11
+- Windows 10 or 11 for the desktop application and Windows-native audits
+- Ubuntu LTS is the initial Linux CLI/audit-preview baseline; no real-time enforcement is claimed
 - Node.js 20 or later for the CLI; Node.js 24 LTS is recommended for desktop builds
 - Microsoft Defender should remain enabled
 
@@ -103,6 +106,24 @@ node .\src\cli.mjs watch "$env:USERPROFILE\Downloads" --quarantine
 
 Use `Ctrl+C` to stop monitoring. For machine-readable scan output, add `--json`.
 
+On the Linux preview, inspect the detected distribution and the capabilities that are actually available:
+
+```bash
+npm run platform:linux
+```
+
+The preview reuses the portable scanner and encrypted quarantine, but it does not install a systemd service, use fanotify/eBPF or block traffic.
+
+There is also an isolated Android UI prototype in [android-test/README.md](android-test/README.md). It is a safe, simulated interface only; it does not scan device storage or replace Android security.
+
+To see whether Aegis is ready to replace Defender, run:
+
+```bash
+npm run protection:readiness
+```
+
+The command is intentionally conservative: the current result is `complementary-scanner` and explicitly keeps Defender enabled.
+
 ### Quarantine
 
 ```powershell
@@ -151,11 +172,11 @@ Disconnect the machine from untrusted networks, avoid entering passwords, keep D
 
 ## Current limitations
 
-Aegis does not yet include a signed Windows minifilter driver, background Windows service, AMSI/ETW sensors, complete Authenticode reputation, archive unpacking, NTFS alternate-data-stream scanning, behavioral sandboxing or a signed anti-tamper root of trust. The daily signed intelligence collector exists but remains disabled until its public key, GitHub secrets and provider access are provisioned. Its optional reputation layer sends only an exact SHA-256 after explicit consent and uses CIRCL context plus opt-in abuse.ch providers; it does not upload files, use VirusTotal as a backend or turn an external “known file” result into a clean verdict. Its 0.7.0 network control is limited to explicit, reversible IP rules in Windows Firewall; it does not inspect URLs, isolate the whole host or mitigate volumetric DDoS attacks. The 0.8.0 exposure inventory is an on-demand, read-only snapshot: it does not block USB, uninstall applications, provide CVE/reputation verdicts from a version alone or intercept camera/microphone use. The 0.9.0 integrity audit detects differences against a release-time local manifest but does not repair or block tampering. It does not inspect files stored inside archives, and its safe root confinement deliberately avoids reparse points and mount-only targets. Quick scans intentionally skip files larger than 128 MiB; protection remains active while the packaged app is hidden in the tray and stops only when the user exits Aegis, signs out or shuts down Windows. A forced process or system shutdown during isolation or restore can leave a recoverable staging file; a later Deep or Full scan treats an unregistered leftover as ordinary content rather than silently excluding it. High entropy and scripting patterns can have legitimate uses, so suspicious findings require human review.
+Aegis does not yet include a signed Windows minifilter driver, background Windows service, AMSI/ETW sensors, complete Authenticode reputation, archive unpacking, NTFS alternate-data-stream scanning, behavioral sandboxing or a signed anti-tamper root of trust. Linux support is currently a headless analysis/audit preview for an Ubuntu LTS baseline; it has no systemd service, fanotify/eBPF telemetry, network enforcement or Windows-equivalent real-time prevention. The daily signed intelligence collector exists but remains disabled until its public key, GitHub secrets and provider access are provisioned. Its optional reputation layer sends only an exact SHA-256 after explicit consent and uses CIRCL context plus opt-in abuse.ch providers; it does not upload files, use VirusTotal as a backend or turn an external “known file” result into a clean verdict. Its 0.7.0 network control is limited to explicit, reversible IP rules in Windows Firewall; it does not inspect URLs, isolate the whole host or mitigate volumetric DDoS attacks. The 0.8.0 exposure inventory is an on-demand, read-only snapshot: it does not block USB, uninstall applications, provide CVE/reputation verdicts from a version alone or intercept camera/microphone use. The 0.9.0 integrity audit detects differences against a release-time local manifest but does not repair or block tampering. It does not inspect files stored inside archives, and its safe root confinement deliberately avoids reparse points and mount-only targets. Quick scans intentionally skip files larger than 128 MiB; protection remains active while the packaged app is hidden in the tray and stops only when the user exits Aegis, signs out or shuts down Windows. A forced process or system shutdown during isolation or restore can leave a recoverable staging file; a later Deep or Full scan treats an unregistered leftover as ordinary content rather than silently excluding it. High entropy and scripting patterns can have legitimate uses, so suspicious findings require human review.
 
 ## Roadmap
 
-Version 0.9.0 includes the earlier scan, quarantine, performance, network, EDR and exposure improvements and adds a bounded integrity audit, local audit trail and explicit reputation consent. It remains a user-session agent rather than a Windows SCM service; that privileged installation boundary must not be claimed until its installer, account ACLs and upgrade recovery have been independently validated. The ordered security and commercialization plan through 1.0.0 is maintained in [docs/ROADMAP.md](docs/ROADMAP.md).
+Version 0.13.0 adds a replacement-readiness gate on top of the Linux portability foundation. It remains separate from the Windows desktop and does not claim Linux real-time protection or permission to disable Defender. The ordered security and commercialization plan through 1.0.0 is maintained in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Security and contributing
 
