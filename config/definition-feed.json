@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "url": "https://raw.githubusercontent.com/manueltorres01/aegis-guard/main/feeds/definitions.bundle.json",
+  "intervalHours": 24,
+  "timeoutMs": 8000,
+  "maxBackoffHours": 72
+}

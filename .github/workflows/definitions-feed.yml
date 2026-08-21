@@ -1,0 +1,67 @@
+name: Daily signed threat-intelligence feed
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: definitions-feed-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Collect and publish signed definitions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AEGIS_DEFINITION_KEY_ID: ${{ secrets.AEGIS_DEFINITION_KEY_ID }}
+      AEGIS_ABUSECH_AUTH_KEY: ${{ secrets.AEGIS_ABUSECH_AUTH_KEY }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Validate collector
+        run: npm run check
+
+      - name: Collect, normalize and sign feed
+        env:
+          AEGIS_DEFINITION_PRIVATE_KEY: ${{ secrets.AEGIS_DEFINITION_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AEGIS_DEFINITION_KEY_ID" || { echo 'Missing AEGIS_DEFINITION_KEY_ID secret.' >&2; exit 1; }
+          test -n "$AEGIS_DEFINITION_PRIVATE_KEY" || { echo 'Missing AEGIS_DEFINITION_PRIVATE_KEY secret.' >&2; exit 1; }
+          test -n "$AEGIS_ABUSECH_AUTH_KEY" || { echo 'Missing AEGIS_ABUSECH_AUTH_KEY secret.' >&2; exit 1; }
+          umask 077
+          private_key="$RUNNER_TEMP/aegis-definition-private.pem"
+          printf '%s' "$AEGIS_DEFINITION_PRIVATE_KEY" > "$private_key"
+          node scripts/collect-threat-intel-feed.mjs \
+            --private-key "$private_key" \
+            --base definitions/signatures.json \
+            --previous feeds/definitions.bundle.json \
+            --output feeds/definitions.bundle.json
+          rm -f "$private_key"
+
+      - name: Commit refreshed feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- feeds/definitions.bundle.json && git ls-files --error-unmatch feeds/definitions.bundle.json >/dev/null 2>&1; then
+            echo 'Feed unchanged; no commit is required.'
+            exit 0
+          fi
+          git config user.name 'aegis-guard-feed[bot]'
+          git config user.email 'aegis-guard-feed[bot]@users.noreply.github.com'
+          git add feeds/definitions.bundle.json
+          git commit -m 'chore(intel): refresh signed threat feed'
+          git push origin "HEAD:${DEFAULT_BRANCH}"

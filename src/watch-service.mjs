@@ -15,7 +15,9 @@ export class WatchService {
     stabilityDelayMs = 250,
     stabilityRequired = 3,
     maxStabilityAttempts = 12,
-    dedupeWindowMs = 5_000
+    dedupeWindowMs = 5_000,
+    maxPendingEvents = Math.max(128, maxQueue * 4),
+    warningIntervalMs = 30_000
   }) {
     this.engine = engine;
     this.quarantine = quarantine;
@@ -26,12 +28,24 @@ export class WatchService {
     this.stabilityRequired = stabilityRequired;
     this.maxStabilityAttempts = maxStabilityAttempts;
     this.dedupeWindowMs = dedupeWindowMs;
-    this.timers = new Map();
+    this.maxPendingEvents = Math.max(maxQueue, maxPendingEvents);
+    this.warningIntervalMs = warningIntervalMs;
+    this.pendingCandidates = new Map();
+    this.pendingTimer = null;
     this.queue = [];
     this.queued = new Set();
     this.dirty = new Set();
     this.recent = new Map();
     this.drainPromise = null;
+    this.lastWarningAt = 0;
+    this.metrics = {
+      eventsReceived: 0,
+      eventsCoalesced: 0,
+      eventsDropped: 0,
+      filesInspected: 0,
+      peakPendingEvents: 0,
+      peakQueueDepth: 0
+    };
   }
 
   async start(target, { autoQuarantine = false } = {}) {
@@ -50,11 +64,7 @@ export class WatchService {
       if (!name) return;
       const candidate = path.resolve(root, String(name));
       if (!isInside(root, candidate) || this.isExcluded(candidate, root)) return;
-      clearTimeout(this.timers.get(candidate));
-      this.timers.set(candidate, setTimeout(() => {
-        this.timers.delete(candidate);
-        if (this.session === session) this.enqueue(candidate);
-      }, this.debounceMs));
+      this.schedule(candidate, session);
     });
     watcher.on('error', error => { void this.handleWatcherError(session, error); });
     session.watcher = watcher;
@@ -70,8 +80,9 @@ export class WatchService {
       previous.watcher.close();
     }
     this.session = null;
-    for (const timer of this.timers.values()) clearTimeout(timer);
-    this.timers.clear();
+    if (this.pendingTimer) clearTimeout(this.pendingTimer);
+    this.pendingTimer = null;
+    this.pendingCandidates.clear();
     this.queue.length = 0;
     this.queued.clear();
     this.dirty.clear();
@@ -91,6 +102,40 @@ export class WatchService {
     this.emit({ type: 'monitor-error', payload: { message: error.message } });
   }
 
+  schedule(file, session = this.session, now = Date.now()) {
+    if (!session || this.session !== session) return false;
+    this.metrics.eventsReceived++;
+    if (this.pendingCandidates.has(file)) {
+      this.metrics.eventsCoalesced++;
+    } else if (this.pendingCandidates.size >= this.maxPendingEvents) {
+      this.metrics.eventsDropped++;
+      this.emitCapacityWarning(now);
+      return false;
+    }
+    this.pendingCandidates.set(file, { deadline: now + this.debounceMs, session });
+    this.metrics.peakPendingEvents = Math.max(this.metrics.peakPendingEvents, this.pendingCandidates.size);
+    this.armPendingTimer();
+    return true;
+  }
+
+  armPendingTimer() {
+    if (this.pendingTimer || !this.pendingCandidates.size) return;
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const pending of this.pendingCandidates.values()) earliest = Math.min(earliest, pending.deadline);
+    this.pendingTimer = setTimeout(() => this.flushPendingCandidates(), Math.max(0, earliest - Date.now()));
+    this.pendingTimer.unref?.();
+  }
+
+  flushPendingCandidates(now = Date.now()) {
+    this.pendingTimer = null;
+    for (const [file, pending] of this.pendingCandidates) {
+      if (pending.deadline > now) continue;
+      this.pendingCandidates.delete(file);
+      if (this.session === pending.session) this.enqueue(file);
+    }
+    this.armPendingTimer();
+  }
+
   enqueue(file) {
     if (!this.session) return;
     if (this.queued.has(file)) {
@@ -98,11 +143,13 @@ export class WatchService {
       return;
     }
     if (this.queue.length >= this.maxQueue) {
-      this.emit({ type: 'monitor-warning', payload: { message: 'Monitor queue is full; a later rescan is recommended' } });
+      this.metrics.eventsDropped++;
+      this.emitCapacityWarning();
       return;
     }
     this.queue.push(file);
     this.queued.add(file);
+    this.metrics.peakQueueDepth = Math.max(this.metrics.peakQueueDepth, this.queue.length);
     if (!this.drainPromise) {
       this.drainPromise = this.drain().finally(() => { this.drainPromise = null; });
     }
@@ -152,6 +199,7 @@ export class WatchService {
         signal: session.controller.signal,
         expectedIdentity: snapshotIdentity(canonicalStat)
       });
+      this.metrics.filesInspected++;
       session.controller.signal.throwIfAborted();
       if (result.verdict === 'malicious' && session.autoQuarantine) {
         const metadata = await this.quarantine.isolate(canonicalFile, result, { signal: session.controller.signal });
@@ -176,6 +224,23 @@ export class WatchService {
     const oldestAllowed = Date.now() - this.dedupeWindowMs;
     for (const [file, entry] of this.recent) if (entry.at < oldestAllowed) this.recent.delete(file);
     while (this.recent.size > 512) this.recent.delete(this.recent.keys().next().value);
+  }
+
+  emitCapacityWarning(now = Date.now()) {
+    if (this.lastWarningAt && now - this.lastWarningAt < this.warningIntervalMs) return;
+    this.lastWarningAt = now;
+    this.emit({ type: 'monitor-warning', payload: { message: 'Monitor capacity was reached; a later rescan is recommended' } });
+  }
+
+  status() {
+    return {
+      active: Boolean(this.session),
+      pendingEvents: this.pendingCandidates.size,
+      queueDepth: this.queue.length,
+      queueLimit: this.maxQueue,
+      pendingLimit: this.maxPendingEvents,
+      ...this.metrics
+    };
   }
 }
 

@@ -6,6 +6,10 @@ const VIEW_META = Object.freeze({
   home: { title: 'Inicio', eyebrow: 'Resumen' },
   scan: { title: 'Analizar', eyebrow: 'Detección local' },
   protection: { title: 'Protección', eyebrow: 'Vigilancia de Descargas' },
+  network: { title: 'Red', eyebrow: 'Auditoría local' },
+  incidents: { title: 'Incidentes', eyebrow: 'Auditoría EDR local' },
+  exposure: { title: 'Exposición', eyebrow: 'Inventario del dispositivo' },
+  integrity: { title: 'Integridad', eyebrow: 'Autoprotección local' },
   results: { title: 'Resultados', eyebrow: 'Historial de análisis' },
   quarantine: { title: 'Cuarentena', eyebrow: 'Almacén cifrado' },
   settings: { title: 'Ajustes', eyebrow: 'Preferencias' }
@@ -13,12 +17,22 @@ const VIEW_META = Object.freeze({
 
 const state = {
   activeView: 'home',
-  settings: { theme: 'system', autoQuarantine: false, launchAtStartup: true },
+  settings: { theme: 'system', autoQuarantine: false, launchAtStartup: true, scheduledScanEnabled: false, scheduledScanMode: 'quick', scheduledScanHour: 3, skipScheduledScanOnBattery: true, ransomwareAuditEnabled: false, networkProtectionMode: 'audit', reputationSharingEnabled: false },
   version: '—',
   engineVersion: '—',
   definitionsVersion: '—',
+  definitions: { version: 0, generatedAt: null, updates: { currentVersion: 0, bundledVersion: 0, source: 'bundled', signature: { status: 'bundled', keyId: null }, rollbackAvailable: false, lastAppliedAt: null, lastRollbackAt: null, lastError: null, updateChannelConfigured: false, feed: null } },
+  threatIntel: { status: { cacheEntries: 0, cacheMaxEntries: 10000, networkEnabled: false, fileUploadEnabled: false, providers: {} }, latest: null },
   results: [],
   resultsTruncated: 0,
+  reportAvailable: false,
+  network: null,
+  networkProtection: { mode: 'audit', active: false, addressesBlocked: 0, domainsPending: 0, skippedDomains: [], rules: [], reversible: true },
+  edr: null,
+  exposure: null,
+  integrity: null,
+  health: { status:'degraded',authenticatedWorkerIpc:false,protectionAvailable:false,statePersistenceAvailable:false,recoveredInterruptedOperation:false,edrAuditAvailable:false,exposureAuditAvailable:false,selfProtectionAvailable:false },
+  performance: { engine: {}, protection: {}, monitor: {}, runtime: {} },
   quarantine: [],
   quarantineInventory: { total: 0, truncatedCount: 0, corruptCount: 0, oversizedCount: 0 },
   activity: [],
@@ -44,6 +58,7 @@ const state = {
     startedAt: null
   },
   protection: { active: false, paused: false, targetLabel: 'Descargas', sessionOnly: true },
+  ransomwareAudit: { mode: 'audit', configured: false, enabled: false, paused: false, blocking: false, rootsConfigured: 0, rootsObserved: 0, canariesActive: 0, recentAlerts: [] },
   startup: { supported: true, enabled: true, requested: true, launchesInBackground: true },
   monitor: { active: false, target: null },
   selectedMonitorTarget: null,
@@ -67,6 +82,11 @@ function cacheElements() {
     'sidebar-version', 'about-version', 'engine-version', 'definitions-version', 'about-definitions',
     'home-status-card', 'status-emblem', 'status-overline', 'home-heading', 'home-status-description',
     'last-scan-label', 'metric-scanned', 'metric-findings', 'metric-quarantine', 'activity-list',
+    'export-report-json', 'export-report-csv', 'run-network-audit', 'export-network-json', 'export-network-csv',
+    'network-summary', 'network-firewall-state', 'network-defender-state', 'network-event-count', 'network-alert-count', 'network-anomaly-summary', 'network-body', 'network-empty', 'network-protection-mode', 'apply-network-protection', 'remove-network-protection', 'network-protection-status',
+    'run-edr-audit', 'export-edr-report', 'edr-summary', 'edr-process-count', 'edr-tree-count', 'edr-persistence-count', 'edr-incident-count', 'edr-suspicious-count', 'edr-body', 'edr-empty', 'edr-limitations', 'edr-limitations-copy', 'edr-badge',
+    'run-exposure-audit', 'export-exposure-json', 'export-exposure-csv', 'exposure-summary', 'exposure-policy-status', 'exposure-policy-expired', 'exposure-device-count', 'exposure-app-count', 'exposure-app-meta', 'exposure-setting-count', 'exposure-privacy-count', 'exposure-body', 'exposure-empty', 'exposure-limitations', 'exposure-limitations-copy',
+    'run-integrity-audit', 'export-integrity-json', 'export-integrity-csv', 'integrity-summary', 'integrity-status-title', 'integrity-status-copy', 'integrity-signature-status', 'integrity-total-count', 'integrity-verified-count', 'integrity-modified-count', 'integrity-missing-copy', 'integrity-body', 'integrity-empty', 'integrity-limitations', 'integrity-limitations-copy',
     'home-monitor-title', 'home-monitor-status', 'results-badge', 'quarantine-badge',
     'scan-choices', 'scan-workspace', 'scan-state-icon', 'scan-phase-label', 'scan-status-title',
     'scan-target-label', 'cancel-scan', 'scan-progress-track', 'scan-progress-value',
@@ -76,18 +96,27 @@ function cacheElements() {
     'scan-skipped-counter', 'scan-count-skipped',
     'scan-current-file', 'protection-visual', 'protection-overline', 'protection-status-heading',
     'protection-description', 'protection-target-label', 'toggle-protection', 'protection-pause-warning',
+    'ransomware-audit-overline', 'ransomware-audit-description', 'ransomware-audit-roots', 'ransomware-audit-alert',
     'monitor-overline', 'monitor-heading', 'monitor-description', 'monitor-target-label',
     'choose-monitor-target', 'start-monitor', 'stop-monitor', 'results-summary',
     'results-body', 'results-empty', 'quarantine-body', 'quarantine-empty', 'refresh-quarantine',
     'quarantine-inventory-warning', 'quarantine-inventory-warning-copy',
-    'theme-select', 'auto-quarantine', 'start-with-windows', 'startup-setting-note',
+    'theme-select', 'auto-quarantine', 'ransomware-audit-enabled', 'reputation-sharing-enabled', 'start-with-windows', 'startup-setting-note',
+    'scheduled-scan-enabled', 'scheduled-scan-mode', 'scheduled-scan-hour', 'scheduled-scan-battery',
     'check-updates', 'restart-update', 'update-status', 'run-simulation',
-    'settings-save-status', 'fatal-panel', 'fatal-message', 'toast-region', 'restore-dialog',
+    'definition-update-copy', 'definition-update-version', 'definition-update-source', 'definition-update-signature', 'import-definition-bundle', 'check-definition-feed', 'rollback-definitions', 'definition-update-status',
+    'settings-save-status', 'health-summary', 'health-ipc', 'health-protection', 'health-persistence', 'health-ransomware', 'health-self-protection', 'health-performance', 'fatal-panel', 'fatal-message', 'toast-region', 'restore-dialog',
     'restore-dialog-copy', 'restore-cancel', 'restore-confirm', 'isolate-dialog',
     'isolate-dialog-copy', 'isolate-cancel', 'isolate-confirm', 'pause-protection-dialog',
     'pause-protection-cancel', 'pause-protection-confirm'
   ];
   for (const id of ids) els[id] = byId(id);
+  for (let hour = 0; hour < 24; hour++) {
+    const option = document.createElement('option');
+    option.value = String(hour);
+    option.textContent = `${String(hour).padStart(2, '0')}:00`;
+    els['scheduled-scan-hour'].append(option);
+  }
 }
 
 function createIcon(symbol) {
@@ -388,6 +417,23 @@ function renderProtection() {
   els['home-monitor-status'].classList.toggle('is-active', active);
 }
 
+function renderRansomwareAudit() {
+  const audit = state.ransomwareAudit ?? {};
+  const configured = audit.configured === true;
+  const active = audit.enabled === true && !audit.paused;
+  els['ransomware-audit-overline'].textContent = active ? 'Auditoría activa · sin bloqueo' : configured && audit.paused ? 'Pausada con la protección global' : 'Modo auditoría desactivado';
+  els['ransomware-audit-description'].textContent = active
+    ? 'Observa cambios rápidos, borrados, extensiones añadidas y canarios. No detiene procesos automáticamente.'
+    : configured && audit.paused
+      ? 'La configuración se conserva y volverá a activarse al reanudar la protección.'
+      : 'Actívala en Ajustes para observar actividad compatible con ransomware sin bloquear procesos.';
+  els['ransomware-audit-roots'].textContent = `${formatCount(audit.rootsObserved)} de ${formatCount(audit.rootsConfigured)} carpetas observadas`;
+  const alert = Array.isArray(audit.recentAlerts) ? audit.recentAlerts[0] : null;
+  els['ransomware-audit-alert'].textContent = alert
+    ? `${formatDate(alert.at, 'Reciente')} · ${safeString(alert.explanation, 'Actividad anómala observada')} · proceso no atribuido`
+    : 'No hay alertas de auditoría recientes.';
+}
+
 function renderMonitor() {
   const paused = Boolean(state.protection.paused);
   const active = Boolean(state.monitor.active);
@@ -435,8 +481,16 @@ function renderStartupSetting() {
   }
 }
 
+function syncScheduleSettings(settings = state.settings) {
+  els['scheduled-scan-enabled'].checked = settings.scheduledScanEnabled === true;
+  els['scheduled-scan-mode'].value = settings.scheduledScanMode === 'full' ? 'full' : 'quick';
+  els['scheduled-scan-hour'].value = String(Number.isSafeInteger(settings.scheduledScanHour) ? settings.scheduledScanHour : 3);
+  els['scheduled-scan-battery'].checked = settings.skipScheduledScanOnBattery !== false;
+}
+
 function resultReason(result) {
   if (safeString(result.reason)) return safeString(result.reason);
+  if (safeString(result.error)) return safeString(result.error);
   const findings = Array.isArray(result.findings) ? result.findings : [];
   return findings.length
     ? safeString(findings[0]?.description ?? findings[0]?.name ?? findings[0]?.id, 'Regla local')
@@ -445,11 +499,26 @@ function resultReason(result) {
       : normalizeVerdict(result.verdict) === 'skipped' ? 'Omitido por los límites del modo de análisis' : 'Revisión recomendada';
 }
 
+let resultsRenderPending = false;
+
+function scheduleResultsRender() {
+  if (resultsRenderPending) return;
+  resultsRenderPending = true;
+  window.requestAnimationFrame(() => {
+    resultsRenderPending = false;
+    renderResults();
+  });
+}
+
 function renderResults() {
   const body = els['results-body'];
-  const visible = state.resultFilter === 'attention'
-    ? state.results.filter(result => normalizeVerdict(result.verdict) !== 'clean')
-    : state.results;
+  const visible = state.results.filter(result => {
+    const verdict = normalizeVerdict(result.verdict);
+    if (state.resultFilter === 'suspicious') return verdict === 'suspicious';
+    if (state.resultFilter === 'malicious') return verdict === 'malicious';
+    if (state.resultFilter === 'not-scanned') return verdict === 'error' || verdict === 'skipped';
+    return true;
+  });
   body.replaceChildren();
   els['results-empty'].hidden = visible.length > 0;
   body.parentElement.parentElement.hidden = visible.length === 0;
@@ -460,7 +529,10 @@ function renderResults() {
     : 'Todavía no hay análisis registrados.';
   els['results-badge'].hidden = attention === 0;
   els['results-badge'].textContent = attention > 99 ? '99+' : String(attention);
+  els['export-report-json'].disabled = !state.reportAvailable;
+  els['export-report-csv'].disabled = !state.reportAvailable;
 
+  const fragment = document.createDocumentFragment();
   for (const result of visible) {
     const row = document.createElement('tr');
     const verdict = normalizeVerdict(result.verdict);
@@ -468,7 +540,7 @@ function renderResults() {
     const verdictCell = document.createElement('td');
     const pill = document.createElement('span');
     pill.className = `verdict-pill ${verdict}`;
-    pill.textContent = verdictLabel(verdict);
+    pill.textContent = result.classification === 'pua' ? 'Aplicación no deseada' : verdictLabel(verdict);
     verdictCell.append(pill);
 
     const fileCell = document.createElement('td');
@@ -490,6 +562,7 @@ function renderResults() {
     reasonCell.textContent = resultReason(result);
 
     const actionCell = document.createElement('td');
+    const actions = document.createElement('div'); actions.className = 'button-row compact-row';
     const isolated = Boolean(result.quarantined ?? result.isolated ?? result.action === 'quarantined');
     if (!isolated && ['malicious', 'suspicious'].includes(verdict) && result.scanId && result.resultId) {
       const isolate = document.createElement('button');
@@ -497,8 +570,19 @@ function renderResults() {
       isolate.className = 'button danger-quiet compact';
       isolate.textContent = 'Aislar';
       isolate.addEventListener('click', () => openIsolateDialog(result));
-      actionCell.append(isolate);
-    } else {
+      actions.append(isolate);
+    }
+    if (result.sha256 && !['error', 'skipped'].includes(verdict)) {
+      const reputation = document.createElement('button');
+      reputation.type = 'button';
+      reputation.className = 'button secondary compact';
+      reputation.textContent = 'Reputación';
+      reputation.title = 'Consultar únicamente el SHA-256 en las fuentes habilitadas';
+      reputation.addEventListener('click', () => void queryThreatIntel(result, reputation));
+      actions.append(reputation);
+    }
+    if (actions.childElementCount) actionCell.append(actions);
+    else {
       const action = document.createElement('span');
       action.className = `state-note${isolated ? ' is-isolated' : ''}`;
       action.textContent = isolated ? 'Aislado' : verdict === 'clean' ? 'Sin acción' : verdict === 'skipped' ? 'No analizado' : 'Revisar';
@@ -506,8 +590,213 @@ function renderResults() {
     }
 
     row.append(verdictCell, fileCell, scoreCell, reasonCell, actionCell);
+    fragment.append(row);
+  }
+  body.append(fragment);
+}
+
+function renderNetwork() {
+  const report = state.network;
+  const events = Array.isArray(report?.events) ? report.events : [];
+  const summary = report?.summary ?? {};
+  const protection = state.networkProtection ?? report?.protection ?? {};
+  const firewall = Array.isArray(report?.windowsSecurity?.firewall) ? report.windowsSecurity.firewall : [];
+  const defender = report?.windowsSecurity?.defender;
+  els['network-summary'].textContent = report?.completedAt ? `Última captura: ${formatDate(report.completedAt)}.` : 'Realiza una captura para atribuir conexiones salientes a sus procesos.';
+  els['network-firewall-state'].textContent = firewall.length && firewall.every(profile => profile.enabled) ? 'Firewall activo' : firewall.length ? 'Revisar Firewall' : 'Firewall sin comprobar';
+  els['network-defender-state'].textContent = defender?.antivirusEnabled && defender?.realTimeProtectionEnabled ? 'Defender activo' : defender ? 'Revisar Defender' : 'Defender sin comprobar';
+  els['network-event-count'].textContent = `${formatCount(summary.connections ?? events.length)} conexiones`;
+  els['network-alert-count'].textContent = `${formatCount(summary.suspicious)} coincidencias con indicadores.`;
+  els['network-anomaly-summary'].textContent = `${formatCount(summary.anomalous)} patrones anómalos`;
+  els['export-network-json'].disabled = !report?.reportAvailable;
+  els['export-network-csv'].disabled = !report?.reportAvailable;
+  els['network-protection-mode'].value = state.settings.networkProtectionMode === 'block' ? 'block' : 'audit';
+  els['apply-network-protection'].disabled = state.settings.networkProtectionMode !== 'block' || !report?.completedAt || Boolean(protection.active);
+  els['remove-network-protection'].disabled = !protection.active && !protection.error;
+  els['network-protection-status'].textContent = protection.error ? 'Revisar permisos' : protection.active ? `${formatCount(protection.addressesBlocked)} IP bloqueadas` : state.settings.networkProtectionMode === 'block' ? 'Bloqueo preparado' : 'Auditoría activa';
+  els['network-protection-status'].classList.toggle('is-active', Boolean(protection.active));
+  els['network-empty'].hidden = events.length > 0;
+  const body = els['network-body']; body.replaceChildren(); body.parentElement.parentElement.hidden = events.length === 0;
+  for (const event of events) {
+    const row=document.createElement('tr');
+    const status=document.createElement('td'); const pill=document.createElement('span'); pill.className=`verdict-pill ${event.verdict==='suspicious'?'suspicious':'clean'}`; pill.textContent=event.verdict==='suspicious'?'Sospechoso':'Observado'; status.append(pill);
+    const destination=document.createElement('td'); destination.className='file-cell'; const target=document.createElement('strong'); target.textContent=event.domain||event.remoteAddress||'Destino desconocido'; const endpoint=document.createElement('small'); endpoint.textContent=`${event.remoteAddress||'—'}:${safeNumber(event.remotePort)}`; destination.append(target,endpoint);
+    const processCell=document.createElement('td'); processCell.className='file-cell'; const processName=document.createElement('strong'); processName.textContent=safeString(event.process?.name,'Proceso desconocido'); const processPath=document.createElement('small'); processPath.textContent=safeString(event.process?.path,`PID ${safeNumber(event.process?.id)}`); processCell.append(processName,processPath);
+    const signature=document.createElement('td'); signature.textContent=event.signature?.status==='valid'?safeString(event.signature.publisher,'Firma válida'):'Sin verificar';
+    const explanation=document.createElement('td'); explanation.textContent=safeString(event.explanation,'Conexión observada.');
+    row.append(status,destination,processCell,signature,explanation); body.append(row);
+  }
+}
+
+async function runNetworkAudit() {
+  els['run-network-audit'].disabled=true; setEngineStatus('Auditando red','busy');
+  try { state.network=await callApi('runNetworkAudit'); if (state.network?.protection) state.networkProtection = state.network.protection; renderNetwork(); showToast('Auditoría completada',`${formatCount(state.network?.summary?.connections)} conexiones observadas.`,'success'); }
+  catch(error){ showToast('No se pudo auditar la red',errorMessage(error),'error'); }
+  finally { els['run-network-audit'].disabled=false; setEngineStatus('Motor listo'); }
+}
+
+async function exportNetworkReport(format) {
+  try { const response=await callApi('exportNetworkReport',{format}); if(!response?.cancelled)showToast('Informe guardado',safeString(response?.label,'Informe de red exportado.'),'success'); }
+  catch(error){ showToast('No se pudo exportar',errorMessage(error),'error'); }
+}
+
+async function applyNetworkProtection() {
+  els['apply-network-protection'].disabled = true; setEngineStatus('Aplicando Firewall', 'busy');
+  try { state.networkProtection = await callApi('applyNetworkProtection'); renderNetwork(); showToast(state.networkProtection?.active ? 'Bloqueo aplicado' : 'Sin reglas aplicadas', state.networkProtection?.error || `${formatCount(state.networkProtection?.addressesBlocked)} direcciones bloqueadas; los dominios quedan pendientes.`, state.networkProtection?.active ? 'success' : 'warning'); }
+  catch (error) { showToast('No se pudo aplicar el bloqueo', errorMessage(error), 'error'); }
+  finally { setEngineStatus('Motor listo'); renderNetwork(); }
+}
+
+async function removeNetworkProtection() {
+  els['remove-network-protection'].disabled = true; setEngineStatus('Retirando Firewall', 'busy');
+  try { state.networkProtection = await callApi('removeNetworkProtection'); renderNetwork(); showToast('Reglas retiradas', 'Se han retirado únicamente las reglas del grupo de Aegis Guard.', 'success'); }
+  catch (error) { showToast('No se pudieron retirar las reglas', errorMessage(error), 'error'); }
+  finally { setEngineStatus('Motor listo'); renderNetwork(); }
+}
+
+function renderEdr() {
+  const report = state.edr;
+  const summary = report?.summary ?? {};
+  const events = Array.isArray(report?.events) ? report.events : [];
+  const available = report?.available === true;
+  els['edr-summary'].textContent = report?.completedAt ? `Última instantánea: ${formatDate(report.completedAt)}.` : available ? 'Instantánea lista.' : 'Toma una instantánea local para revisar procesos y persistencia.';
+  els['edr-process-count'].textContent = `${formatCount(summary.processes)} procesos`;
+  els['edr-tree-count'].textContent = `${formatCount(summary.processTreeEdges)} relaciones padre-hijo`;
+  els['edr-persistence-count'].textContent = `${formatCount(summary.persistenceArtifacts)} persistencias`;
+  els['edr-incident-count'].textContent = `${formatCount(summary.incidents)} incidentes`;
+  els['edr-suspicious-count'].textContent = `${formatCount(summary.suspicious)} indicios requieren revisión.`;
+  els['export-edr-report'].disabled = !report?.reportAvailable;
+  els['edr-badge'].hidden = !summary.incidents;
+  els['edr-badge'].textContent = summary.incidents > 99 ? '99+' : String(summary.incidents ?? 0);
+  els['edr-empty'].hidden = events.length > 0;
+  const body = els['edr-body'];
+  body.replaceChildren();
+  body.parentElement.parentElement.hidden = events.length === 0;
+  for (const event of events.slice(0, 120)) {
+    const row = document.createElement('tr');
+    const status = document.createElement('td');
+    const pill = document.createElement('span');
+    pill.className = `verdict-pill ${event.verdict === 'suspicious' ? 'suspicious' : 'clean'}`;
+    pill.textContent = event.verdict === 'suspicious' ? 'Sospechoso' : 'Observado';
+    status.append(pill);
+    const kind = document.createElement('td');
+    kind.textContent = ({ process: 'Proceso', persistence: 'Persistencia', network: 'Red', file: 'Archivo', ransomware: 'Ransomware' })[event.kind] ?? 'Evento';
+    const subject = document.createElement('td'); subject.className = 'file-cell';
+    const subjectStrong = document.createElement('strong'); subjectStrong.textContent = safeString(event.process?.name || event.artifact?.label, event.title || 'Evento local');
+    const subjectSmall = document.createElement('small'); subjectSmall.textContent = safeString(event.process?.path || event.artifact?.path, event.process?.attributed === false ? 'Proceso no atribuido' : 'Instantánea local');
+    subject.append(subjectStrong, subjectSmall);
+    const technique = document.createElement('td');
+    technique.textContent = Array.isArray(event.techniqueIds) && event.techniqueIds.length ? event.techniqueIds.join(' · ') : '—';
+    technique.title = Array.isArray(event.techniqueLabels) ? event.techniqueLabels.join(' · ') : '';
+    const explanation = document.createElement('td'); explanation.textContent = safeString(event.explanation, event.title);
+    row.append(status, kind, subject, technique, explanation); body.append(row);
+  }
+  const limitations = Array.isArray(report?.limitations) ? report.limitations : [];
+  els['edr-limitations'].hidden = limitations.length === 0 && !report?.error;
+  els['edr-limitations-copy'].textContent = report?.error ? report.error : limitations.join(' ');
+}
+
+async function runEdrAudit() {
+  els['run-edr-audit'].disabled = true; setEngineStatus('Auditando procesos', 'busy');
+  try { state.edr = await callApi('runEdrAudit'); renderEdr(); showToast('Auditoría EDR completada', `${formatCount(state.edr?.summary?.incidents)} incidentes observados.`, 'success'); }
+  catch (error) { showToast('No se pudo auditar el equipo', errorMessage(error), 'error'); }
+  finally { els['run-edr-audit'].disabled = false; setEngineStatus('Motor listo'); }
+}
+
+async function exportEdrReport() {
+  try { const response = await callApi('exportEdrReport'); if (!response?.cancelled) showToast('Informe guardado', safeString(response?.label, 'Informe EDR exportado.'), 'success'); }
+  catch (error) { showToast('No se pudo exportar', errorMessage(error), 'error'); }
+}
+
+function renderExposure() {
+  const report = state.exposure;
+  const summary = report?.summary ?? {};
+  const devices = Array.isArray(report?.devices) ? report.devices : [];
+  const applications = Array.isArray(report?.applications) ? report.applications : [];
+  const unsafeSettings = Array.isArray(report?.unsafeSettings) ? report.unsafeSettings : [];
+  const privacy = Array.isArray(report?.privacy) ? report.privacy : [];
+  els['exposure-summary'].textContent = report?.completedAt ? `Última instantánea: ${formatDate(report.completedAt)}.` : 'Toma una instantánea local de medios extraíbles, aplicaciones y ajustes de seguridad.';
+  els['exposure-device-count'].textContent = `${formatCount(summary.removableDevices ?? devices.length)} medios extraíbles`;
+  els['exposure-app-count'].textContent = `${formatCount(summary.applications ?? applications.length)} aplicaciones`;
+  els['exposure-app-meta'].textContent = `${formatCount(summary.applicationsWithoutPublisher)} sin editor · ${formatCount(summary.applicationsWithoutVersion)} sin versión.`;
+  els['exposure-setting-count'].textContent = `${formatCount(summary.unsafeSettings ?? unsafeSettings.length)} ajustes`;
+  els['exposure-privacy-count'].textContent = `${formatCount(summary.privacyEntries ?? privacy.length)} permisos`;
+  const policies = report?.policies ?? {};
+  const policyCount = formatCount((policies.publishers?.length ?? 0) + (policies.hashes?.length ?? 0));
+  els['exposure-policy-status'].textContent = policyCount === '0' ? 'Sin indicadores locales configurados; el inventario es informativo.' : `${policyCount} indicadores locales en modo auditoría; no se bloquea ninguna aplicación.`;
+  els['exposure-policy-expired'].textContent = `${formatCount(summary.expiredExceptions ?? policies.expiredExceptions?.length)} excepciones caducadas`;
+  els['export-exposure-json'].disabled = !report?.reportAvailable;
+  els['export-exposure-csv'].disabled = !report?.reportAvailable;
+  const rows = [];
+  for (const device of devices.slice(0, 32)) rows.push({ kind:'Medio extraíble', name:device.label || device.drive, detail:`${device.drive} · ${device.fileSystem}`, status:'Observado', path:device.provider || 'Volumen local' });
+  for (const app of applications.slice(0, 120)) rows.push({ kind:'Aplicación', name:app.name, detail:app.version || 'Versión no indicada', status:app.policy?.status === 'publisher-allowed' ? 'Editor permitido' : app.policy?.status === 'expired-exception' ? 'Excepción caducada' : app.policy?.status === 'exception' ? 'Excepción local' : 'Sin decisión', path:app.installLocation || app.publisher || 'Ruta no indicada' });
+  for (const finding of unsafeSettings.slice(0, 64)) rows.push({ kind:'Ajuste', name:finding.title, detail:finding.explanation, status:finding.severity === 'high' ? 'Revisar' : 'Aviso', path:finding.id });
+  for (const item of privacy.slice(0, 64)) rows.push({ kind:'Privacidad', name:item.capability === 'webcam' ? 'Cámara' : 'Micrófono', detail:item.app, status:item.decision === 'allowed' ? 'Permitido' : item.decision === 'denied' ? 'Denegado' : 'Desconocido', path:item.lastUsed ? formatDate(item.lastUsed) : 'Sin uso registrado' });
+  els['exposure-empty'].hidden = rows.length > 0;
+  const body = els['exposure-body']; body.replaceChildren(); body.parentElement.parentElement.hidden = rows.length === 0;
+  for (const item of rows) {
+    const row = document.createElement('tr');
+    for (const value of [item.kind, item.name, item.detail, item.status, item.path]) { const cell = document.createElement('td'); cell.textContent = safeString(value, '—'); row.append(cell); }
     body.append(row);
   }
+  const limitations = Array.isArray(report?.limitations) ? report.limitations : [];
+  els['exposure-limitations'].hidden = limitations.length === 0 && !report?.error;
+  els['exposure-limitations-copy'].textContent = report?.error ? report.error : limitations.join(' ');
+}
+
+async function runExposureAudit() {
+  els['run-exposure-audit'].disabled = true; setEngineStatus('Auditando exposición', 'busy');
+  try { state.exposure = await callApi('runExposureAudit'); renderExposure(); showToast('Auditoría completada', `${formatCount(state.exposure?.summary?.applications)} aplicaciones y ${formatCount(state.exposure?.summary?.removableDevices)} medios observados.`, 'success'); }
+  catch (error) { showToast('No se pudo auditar la exposición', errorMessage(error), 'error'); }
+  finally { els['run-exposure-audit'].disabled = false; setEngineStatus('Motor listo'); }
+}
+
+async function exportExposureReport(format) {
+  try { const response = await callApi('exportExposureReport', { format }); if (!response?.cancelled) showToast('Informe guardado', safeString(response?.label, 'Informe de exposición exportado.'), 'success'); }
+  catch (error) { showToast('No se pudo exportar', errorMessage(error), 'error'); }
+}
+
+function renderIntegrity() {
+  const report = state.integrity;
+  const summary = report?.summary ?? {};
+  const items = Array.isArray(report?.items) ? report.items : [];
+  const healthy = report?.available && summary.healthy;
+  els['integrity-summary'].textContent = report?.completedAt ? `Última comprobación: ${formatDate(report.completedAt)}.` : 'Comprueba que los componentes de seguridad coinciden con la línea base del empaquetado.';
+  els['integrity-status-title'].textContent = !report ? 'Sin comprobación' : !report.available ? 'Línea base no disponible' : healthy ? 'Integridad verificada' : 'Revisión necesaria';
+  els['integrity-status-copy'].textContent = report?.error || (healthy ? 'No se han detectado cambios en los archivos comprobados.' : 'Hay componentes modificados, ausentes o sin línea base; revisa el informe antes de continuar.');
+  els['integrity-signature-status'].textContent = report?.signature?.status === 'verified' ? 'Manifiesto firmado' : report?.signature?.status === 'present-unverified' ? 'Firma pendiente de verificar' : 'Firma no configurada';
+  els['integrity-total-count'].textContent = `${formatCount(summary.total)} archivos`;
+  els['integrity-verified-count'].textContent = `${formatCount(summary.verified)} verificados`;
+  els['integrity-modified-count'].textContent = `${formatCount(summary.modified)} cambios`;
+  els['integrity-missing-copy'].textContent = `${formatCount(summary.missing)} ausentes · ${formatCount(summary.untracked)} sin línea base.`;
+  els['export-integrity-json'].disabled = !report?.reportAvailable;
+  els['export-integrity-csv'].disabled = !report?.reportAvailable;
+  els['integrity-empty'].hidden = items.length > 0;
+  const body = els['integrity-body']; body.replaceChildren(); body.parentElement.parentElement.hidden = items.length === 0;
+  for (const item of items) {
+    const row = document.createElement('tr');
+    const status = document.createElement('td'); const pill = document.createElement('span'); pill.className = `verdict-pill ${item.status === 'verified' ? 'clean' : item.status === 'modified' ? 'suspicious' : 'malicious'}`; pill.textContent = ({ verified:'Verificado', modified:'Modificado', missing:'Ausente', untracked:'Sin línea base' })[item.status] ?? 'Revisar'; status.append(pill);
+    const file = document.createElement('td'); file.className = 'file-cell'; const name = document.createElement('strong'); name.textContent = fileName(item.path); const relative = document.createElement('small'); relative.textContent = item.path; file.append(name, relative);
+    const expected = document.createElement('td'); expected.textContent = item.expectedSha256 || '—';
+    const actual = document.createElement('td'); actual.textContent = item.actualSha256 || '—';
+    const size = document.createElement('td'); size.textContent = item.sizeBytes ? `${formatCount(Math.round(item.sizeBytes / 1024))} KiB` : '—';
+    row.append(status, file, expected, actual, size); body.append(row);
+  }
+  const limitations = Array.isArray(report?.limitations) ? report.limitations : [];
+  els['integrity-limitations'].hidden = limitations.length === 0 && !report?.error;
+  els['integrity-limitations-copy'].textContent = report?.error ? report.error : limitations.join(' ');
+}
+
+async function runIntegrityAudit() {
+  els['run-integrity-audit'].disabled = true; setEngineStatus('Comprobando integridad', 'busy');
+  try { state.integrity = await callApi('runIntegrityAudit'); renderIntegrity(); showToast('Comprobación completada', `${formatCount(state.integrity?.summary?.verified)} archivos verificados; ${formatCount((state.integrity?.summary?.modified ?? 0) + (state.integrity?.summary?.missing ?? 0))} requieren revisión.`, state.integrity?.summary?.healthy ? 'success' : 'warning'); }
+  catch (error) { showToast('No se pudo comprobar la integridad', errorMessage(error), 'error'); }
+  finally { els['run-integrity-audit'].disabled = false; setEngineStatus('Motor listo'); }
+}
+
+async function exportIntegrityReport(format) {
+  try { const response = await callApi('exportIntegrityReport', { format }); if (!response?.cancelled) showToast('Informe guardado', safeString(response?.label, 'Informe de integridad exportado.'), 'success'); }
+  catch (error) { showToast('No se pudo exportar', errorMessage(error), 'error'); }
 }
 
 function renderQuarantine() {
@@ -560,12 +849,17 @@ function renderQuarantine() {
     idCell.title = identifier;
 
     const actionCell = document.createElement('td');
+    const showPath = document.createElement('button');
+    showPath.type = 'button';
+    showPath.className = 'button secondary';
+    showPath.textContent = 'Ruta';
+    showPath.addEventListener('click', () => void callApi('showQuarantinePath', { id: item.id }).catch(error => showToast('No se pudo mostrar la ruta', errorMessage(error), 'error')));
     const restore = document.createElement('button');
     restore.type = 'button';
     restore.className = 'button secondary';
     restore.textContent = 'Restaurar';
     restore.addEventListener('click', () => openRestoreDialog(item));
-    actionCell.append(restore);
+    const actions = document.createElement('div'); actions.className = 'button-row compact-row'; actions.append(showPath, restore); actionCell.append(actions);
     row.append(pathCell, dateCell, verdictCell, idCell, actionCell);
     body.append(row);
   }
@@ -702,6 +996,7 @@ function applyCompletedScan(report = {}, { announce = true } = {}) {
   const summary = getSummary(report);
   const results = normalizeResults(report);
   if (results.length) state.results = results;
+  state.reportAvailable = report.reportAvailable !== false;
   state.resultsTruncated = safeNumber(report.resultsTruncated);
   const completedAt = report.completedAt ?? report.finishedAt ?? new Date().toISOString();
   state.lastScan = { ...summary, completedAt };
@@ -938,7 +1233,7 @@ async function refreshQuarantine({ quiet = false } = {}) {
 function openRestoreDialog(item) {
   state.restoreId = safeString(item?.id);
   if (!state.restoreId) return;
-  els['restore-dialog-copy'].textContent = `Vas a restaurar «${fileName(item.originalPath ?? item.path ?? item.label)}». Elige una ubicación segura y analízalo con Microsoft Defender antes de abrirlo.`;
+  els['restore-dialog-copy'].textContent = `Vas a restaurar «${fileName(item.originalPath ?? item.path ?? item.label)}» exactamente en la ruta desde la que Aegis lo aisló. No se sobrescribirá ningún archivo existente.`;
   els['restore-dialog'].showModal();
 }
 
@@ -949,6 +1244,30 @@ function openIsolateDialog(result) {
   state.isolateRequest = { scanId, resultId };
   els['isolate-dialog-copy'].textContent = `Aegis moverá «${fileName(result.path ?? result.label ?? result.name)}» a la cuarentena cifrada. Podrás restaurarlo más adelante.`;
   els['isolate-dialog'].showModal();
+}
+
+async function queryThreatIntel(result, button) {
+  const sha256 = safeString(result?.sha256).toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(sha256)) return;
+  if (!state.settings.reputationSharingEnabled) {
+    showToast('Consulta desactivada', 'Activa «Permitir consultas de reputación» en Ajustes para enviar solo este SHA-256.', 'warning');
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    const lookup = await callApi('queryThreatIntel', { sha256 });
+    state.threatIntel.latest = lookup;
+    const label = lookup?.verdict === 'known-malicious'
+      ? 'Coincide con inteligencia de malware conocida.'
+      : lookup?.verdict === 'known-file-context'
+        ? 'Archivo conocido en CIRCL; esto no equivale a una garantía de limpieza.'
+        : lookup?.verdict === 'unknown' ? 'No hay coincidencia concluyente en las fuentes consultadas.' : 'No se pudo consultar una fuente disponible.';
+    showToast('Consulta completada', label, lookup?.verdict === 'known-malicious' ? 'error' : 'success');
+  } catch (error) {
+    showToast('No se pudo consultar reputación', errorMessage(error), 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function confirmIsolate() {
@@ -964,7 +1283,7 @@ async function confirmIsolate() {
     }
     els['isolate-dialog'].close();
     state.isolateRequest = null;
-    renderResults();
+    scheduleResultsRender();
     await refreshQuarantine({ quiet: true });
     showToast('Archivo aislado', 'Se movió a la cuarentena cifrada sin eliminarlo definitivamente.', 'success');
   } catch (error) {
@@ -998,12 +1317,33 @@ async function confirmRestore() {
   }
 }
 
+async function exportReport(format) {
+  const button = els[`export-report-${format}`];
+  button.disabled = true;
+  try {
+    const response = await callApi('exportReport', { format });
+    if (response?.cancelled) return;
+    showToast('Informe guardado', `${format.toUpperCase()} completo: ${formatCount(response?.count)} registros.`, 'success');
+  } catch (error) {
+    showToast('No se pudo guardar el informe', errorMessage(error), 'error');
+  } finally {
+    button.disabled = !state.reportAvailable;
+  }
+}
+
 async function saveSettings() {
   const previous = { ...state.settings };
   const next = {
     theme: els['theme-select'].value,
     autoQuarantine: Boolean(els['auto-quarantine'].checked),
-    launchAtStartup: Boolean(els['start-with-windows'].checked)
+    launchAtStartup: Boolean(els['start-with-windows'].checked),
+    scheduledScanEnabled: Boolean(els['scheduled-scan-enabled'].checked),
+    scheduledScanMode: els['scheduled-scan-mode'].value,
+    scheduledScanHour: Number(els['scheduled-scan-hour'].value),
+    skipScheduledScanOnBattery: Boolean(els['scheduled-scan-battery'].checked),
+    ransomwareAuditEnabled: Boolean(els['ransomware-audit-enabled'].checked),
+    networkProtectionMode: els['network-protection-mode'].value === 'block' ? 'block' : 'audit',
+    reputationSharingEnabled: Boolean(els['reputation-sharing-enabled'].checked)
   };
   state.settings = next;
   applyTheme(next.theme);
@@ -1025,6 +1365,8 @@ async function saveSettings() {
     state.settings = previous;
     els['theme-select'].value = previous.theme;
     els['auto-quarantine'].checked = previous.autoQuarantine;
+    els['ransomware-audit-enabled'].checked = previous.ransomwareAuditEnabled;
+    syncScheduleSettings(previous);
     applyTheme(previous.theme);
     renderStartupSetting();
     els['settings-save-status'].textContent = 'No se pudieron guardar los cambios.';
@@ -1065,6 +1407,76 @@ async function restartAndUpdate() {
   } catch (error) {
     els['restart-update'].disabled = false;
     els['update-status'].textContent = errorMessage(error, 'No se pudo iniciar la actualización.');
+  }
+}
+
+async function importDefinitionBundle() {
+  els['import-definition-bundle'].disabled = true;
+  els['definition-update-status'].textContent = 'Selecciona un paquete firmado…';
+  try {
+    const response = await callApi('importDefinitionBundle');
+    if (response?.cancelled) {
+      els['definition-update-status'].textContent = '';
+      return;
+    }
+    state.definitions = { ...state.definitions, updates: response };
+    state.definitionsVersion = String(response.currentVersion ?? state.definitionsVersion);
+    els['definitions-version'].textContent = state.definitionsVersion;
+    els['about-definitions'].textContent = state.definitionsVersion;
+    renderDefinitionUpdates();
+    showToast('Definiciones actualizadas', `Versión ${formatCount(response.currentVersion)} validada y activada.`, 'success');
+  } catch (error) {
+    els['definition-update-status'].textContent = errorMessage(error, 'No se pudo validar el paquete de definiciones.');
+    showToast('Actualización rechazada', errorMessage(error), 'error');
+  } finally {
+    els['import-definition-bundle'].disabled = false;
+  }
+}
+
+async function rollbackDefinitions() {
+  els['rollback-definitions'].disabled = true;
+  els['definition-update-status'].textContent = 'Restaurando la definición anterior…';
+  try {
+    const response = await callApi('rollbackDefinitions');
+    state.definitions = { ...state.definitions, updates: response };
+    state.definitionsVersion = String(response.currentVersion ?? state.definitionsVersion);
+    els['definitions-version'].textContent = state.definitionsVersion;
+    els['about-definitions'].textContent = state.definitionsVersion;
+    renderDefinitionUpdates();
+    showToast('Definiciones restauradas', `Versión activa: ${formatCount(response.currentVersion)}.`, 'success');
+  } catch (error) {
+    els['definition-update-status'].textContent = errorMessage(error, 'No se pudo restaurar la definición anterior.');
+    showToast('No se pudo restaurar', errorMessage(error), 'error');
+  } finally {
+    els['rollback-definitions'].disabled = false;
+  }
+}
+
+async function checkDefinitionFeed() {
+  const button = els['check-definition-feed'];
+  button.disabled = true;
+  els['definition-update-status'].textContent = 'Comprobando el canal firmado…';
+  try {
+    const response = await callApi('checkDefinitionFeed', { force: true });
+    state.definitions = { ...state.definitions, updates: normalizeDefinitionUpdates(response) };
+    state.definitionsVersion = String(response.currentVersion ?? state.definitionsVersion);
+    els['definitions-version'].textContent = state.definitionsVersion;
+    els['about-definitions'].textContent = state.definitionsVersion;
+    renderDefinitionUpdates();
+    const result = response?.feedResult ?? response?.result;
+    if (result === 'applied') showToast('Definiciones actualizadas', `Versión ${formatCount(response.feedVersion ?? response.currentVersion)} validada y activada.`, 'success');
+    else if (result === 'not-modified' || result === 'already-current') showToast('Definiciones al día', 'El paquete firmado ya está aplicado.', 'success');
+    else if (result === 'not-configured') showToast('Canal no configurado', 'La aplicación necesita una URL HTTPS y una clave pública de confianza.', 'warning');
+    else if (result === 'not-due') showToast('Comprobación aplazada', 'La próxima comprobación diaria aún no ha vencido.', 'info');
+    else if (result === 'busy') showToast('Comprobación aplazada', 'Hay un análisis en curso.', 'info');
+    return response;
+  } catch (error) {
+    els['definition-update-status'].textContent = errorMessage(error, 'No se pudo consultar el canal de definiciones.');
+    showToast('Canal no disponible', errorMessage(error), 'warning');
+    return null;
+  } finally {
+    button.disabled = false;
+    renderDefinitionUpdates();
   }
 }
 
@@ -1174,7 +1586,7 @@ function handleAppEvent(rawEvent) {
     if (verdict === 'malicious' || verdict === 'suspicious') {
       setScanUi({ threats: state.scan.threats + 1 });
     }
-    renderResults();
+    scheduleResultsRender();
     return;
   }
 
@@ -1264,6 +1676,24 @@ function handleAppEvent(rawEvent) {
     return;
   }
 
+  if (type === 'ransomware-audit-state') {
+    state.ransomwareAudit = event;
+    renderRansomwareAudit();
+    return;
+  }
+
+  if (type === 'ransomware-audit-alert') {
+    state.ransomwareAudit = {
+      ...state.ransomwareAudit,
+      recentAlerts: [event, ...(state.ransomwareAudit.recentAlerts ?? [])].slice(0, 20)
+    };
+    state.activity.unshift({ kind: 'monitor', title: 'Alerta ransomware en auditoría', description: `${safeString(event.rootLabel, 'Carpeta protegida')} · proceso no atribuido`, at: event.at });
+    renderRansomwareAudit();
+    renderActivity();
+    showToast('Actividad compatible con ransomware', 'Aegis la ha observado, pero esta versión no ha bloqueado ningún proceso.', 'warning');
+    return;
+  }
+
   if (type === 'monitor-started') {
     const target = state.selectedMonitorTarget || state.monitor.target || {};
     state.monitor = { active: true, target: { ...target, label: safeString(event.label ?? event.targetLabel, target.label) } };
@@ -1285,9 +1715,40 @@ function handleAppEvent(rawEvent) {
       description: `${fileName(result.path ?? result.label)} · ${verdictLabel(result.verdict)}`,
       at: new Date().toISOString()
     });
-    renderResults();
+    scheduleResultsRender();
     renderActivity();
     if (normalizeVerdict(result.verdict) !== 'clean') showToast('La vigilancia encontró un indicio', 'Consulta Resultados para ver los detalles.', 'warning');
+    return;
+  }
+
+  if (type === 'definitions-changed') {
+    state.definitions = { ...state.definitions, updates: normalizeDefinitionUpdates(event) };
+    state.definitionsVersion = String(event.currentVersion ?? state.definitionsVersion);
+    els['definitions-version'].textContent = state.definitionsVersion;
+    els['about-definitions'].textContent = state.definitionsVersion;
+    renderDefinitionUpdates();
+    return;
+  }
+
+  if (type === 'definitions-update-ready') {
+    const payload = event.payload && typeof event.payload === 'object' ? event.payload : event;
+    state.definitions = { ...state.definitions, updates: normalizeDefinitionUpdates(payload) };
+    state.definitionsVersion = String(payload.currentVersion ?? state.definitionsVersion);
+    els['definitions-version'].textContent = state.definitionsVersion;
+    els['about-definitions'].textContent = state.definitionsVersion;
+    renderDefinitionUpdates();
+    showToast('Definiciones actualizadas', `Versión ${formatCount(payload.feedVersion ?? payload.currentVersion)} validada y activada.`, 'success');
+    return;
+  }
+
+  if (type === 'definitions-feed-warning') {
+    const payload = event.payload && typeof event.payload === 'object' ? event.payload : event;
+    els['definition-update-status'].textContent = safeString(payload.message, 'No se pudo consultar el canal de definiciones.');
+    return;
+  }
+
+  if (type === 'threat-intel-result') {
+    state.threatIntel.latest = normalizeThreatIntelResult(event);
     return;
   }
 
@@ -1295,10 +1756,21 @@ function handleAppEvent(rawEvent) {
     state.settings = {
       theme: ['system', 'light', 'dark'].includes(event.theme) ? event.theme : state.settings.theme,
       autoQuarantine: event.autoQuarantine === true,
-      launchAtStartup: event.launchAtStartup !== false
+      launchAtStartup: event.launchAtStartup !== false,
+      scheduledScanEnabled: event.scheduledScanEnabled === true,
+      scheduledScanMode: event.scheduledScanMode === 'full' ? 'full' : 'quick',
+      scheduledScanHour: Number.isSafeInteger(event.scheduledScanHour) ? event.scheduledScanHour : 3,
+      skipScheduledScanOnBattery: event.skipScheduledScanOnBattery !== false,
+      ransomwareAuditEnabled: event.ransomwareAuditEnabled === true,
+      networkProtectionMode: event.networkProtectionMode === 'block' ? 'block' : 'audit',
+      reputationSharingEnabled: event.reputationSharingEnabled === true
     };
     els['theme-select'].value = state.settings.theme;
     els['auto-quarantine'].checked = state.settings.autoQuarantine;
+    els['ransomware-audit-enabled'].checked = state.settings.ransomwareAuditEnabled;
+    els['reputation-sharing-enabled'].checked = state.settings.reputationSharingEnabled;
+    els['network-protection-mode'].value = state.settings.networkProtectionMode;
+    syncScheduleSettings(state.settings);
     renderStartupSetting();
     applyTheme(state.settings.theme);
     return;
@@ -1333,10 +1805,26 @@ function normalizeBootstrap(data = {}) {
     version: safeString(data.version ?? data.appVersion ?? appInfo.version, '—'),
     engineVersion: safeString(data.engineVersion ?? engine.version, '—'),
     definitionsVersion: safeString(data.definitionsVersion ?? definitions.version, 'locales'),
+    definitions: {
+      version: safeString(definitions.version ?? data.definitionsVersion, '—'),
+      generatedAt: safeString(definitions.generatedAt),
+      updates: normalizeDefinitionUpdates(definitions.updates)
+    },
+    threatIntel: {
+      status: normalizeThreatIntelStatus(data.threatIntel?.status),
+      latest: normalizeThreatIntelResult(data.threatIntel?.latest)
+    },
     settings: {
       theme: ['system', 'light', 'dark'].includes(settings.theme) ? settings.theme : 'system',
       autoQuarantine: settings.autoQuarantine === true,
-      launchAtStartup: settings.launchAtStartup !== false
+      launchAtStartup: settings.launchAtStartup !== false,
+      scheduledScanEnabled: settings.scheduledScanEnabled === true,
+      scheduledScanMode: settings.scheduledScanMode === 'full' ? 'full' : 'quick',
+      scheduledScanHour: Number.isSafeInteger(settings.scheduledScanHour) ? settings.scheduledScanHour : 3,
+      skipScheduledScanOnBattery: settings.skipScheduledScanOnBattery !== false,
+      ransomwareAuditEnabled: settings.ransomwareAuditEnabled === true,
+      networkProtectionMode: settings.networkProtectionMode === 'block' ? 'block' : 'audit',
+      reputationSharingEnabled: settings.reputationSharingEnabled === true
     },
     quarantine,
     quarantineInventory: {
@@ -1346,16 +1834,91 @@ function normalizeBootstrap(data = {}) {
       oversizedCount: safeNumber(rawQuarantineInventory.oversizedCount)
     },
     results,
+    reportAvailable: Boolean(data.reportAvailable),
+    network: data.network && typeof data.network === 'object' ? data.network : null,
+    networkProtection: data.networkProtection && typeof data.networkProtection === 'object' ? data.networkProtection : { mode: settings.networkProtectionMode === 'block' ? 'block' : 'audit', active: false, addressesBlocked: 0, domainsPending: 0 },
+    edr: data.edr && typeof data.edr === 'object' ? data.edr : null,
+    exposure: data.exposure && typeof data.exposure === 'object' ? data.exposure : null,
+    integrity: data.integrity && typeof data.integrity === 'object' ? data.integrity : null,
+    health: data.health && typeof data.health === 'object' ? data.health : {},
+    performance: data.performance && typeof data.performance === 'object' ? data.performance : {},
     activity: Array.isArray(data.activity ?? data.history) ? (data.activity ?? data.history) : [],
     lastScan,
     totalScanned: safeNumber(stats.totalScanned ?? data.totalScanned ?? persisted.totalScanned ?? getSummary(lastScan ?? {}).scanned),
     protection: data.protection && typeof data.protection === 'object'
       ? data.protection
       : { active: true, paused: false, targetLabel: 'Descargas', sessionOnly: true },
+    ransomwareAudit: data.ransomwareAudit && typeof data.ransomwareAudit === 'object'
+      ? data.ransomwareAudit
+      : { mode: 'audit', configured: false, enabled: false, paused: false, blocking: false, rootsConfigured: 0, rootsObserved: 0, canariesActive: 0, recentAlerts: [] },
     startup: data.startup && typeof data.startup === 'object'
       ? data.startup
       : { supported: true, enabled: settings.launchAtStartup !== false, requested: settings.launchAtStartup !== false, launchesInBackground: true },
     monitor: data.monitor && typeof data.monitor === 'object' ? data.monitor : { active: false, target: null }
+  };
+}
+
+function normalizeDefinitionUpdates(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    currentVersion: safeNumber(input.currentVersion),
+    bundledVersion: safeNumber(input.bundledVersion),
+    source: input.source === 'updated' ? 'updated' : 'bundled',
+    signature: { status: input.signature?.status === 'verified' ? 'verified' : 'bundled', keyId: safeString(input.signature?.keyId) || null },
+    rollbackAvailable: Boolean(input.rollbackAvailable),
+    lastAppliedAt: safeString(input.lastAppliedAt) || null,
+    lastRollbackAt: safeString(input.lastRollbackAt) || null,
+    lastError: safeString(input.lastError) || null,
+    updateChannelConfigured: Boolean(input.updateChannelConfigured),
+    networkEnabled: false,
+    feed: normalizeDefinitionFeed(input.feed),
+    feedResult: safeString(input.feedResult) || null,
+    feedVersion: input.feedVersion === undefined ? null : safeNumber(input.feedVersion)
+  };
+}
+
+function normalizeDefinitionFeed(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    enabled: input.enabled === true,
+    configured: input.configured === true,
+    host: safeString(input.host) || null,
+    intervalHours: safeNumber(input.intervalHours, 24),
+    due: input.due === true,
+    inFlight: input.inFlight === true,
+    lastCheckedAt: safeString(input.lastCheckedAt) || null,
+    lastSuccessfulAt: safeString(input.lastSuccessfulAt) || null,
+    nextCheckAt: safeString(input.nextCheckAt) || null,
+    lastAppliedVersion: safeNumber(input.lastAppliedVersion),
+    lastError: safeString(input.lastError) || null,
+    consecutiveFailures: safeNumber(input.consecutiveFailures),
+    etagStored: input.etagStored === true,
+    lastModifiedStored: input.lastModifiedStored === true
+  };
+}
+
+function normalizeThreatIntelStatus(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    cacheEntries: safeNumber(input.cacheEntries),
+    cacheMaxEntries: safeNumber(input.cacheMaxEntries, 10000),
+    ttlMs: safeNumber(input.ttlMs),
+    lastLookupAt: safeString(input.lastLookupAt) || null,
+    networkEnabled: input.networkEnabled === true,
+    fileUploadEnabled: false,
+    providers: input.providers && typeof input.providers === 'object' ? input.providers : {}
+  };
+}
+
+function normalizeThreatIntelResult(value) {
+  if (!value || typeof value !== 'object' || !/^[a-f0-9]{64}$/i.test(String(value.sha256 ?? ''))) return null;
+  return {
+    sha256: String(value.sha256).toLowerCase(),
+    verdict: ['known-malicious', 'known-file-context', 'unknown', 'unavailable'].includes(value.verdict) ? value.verdict : 'unknown',
+    confidence: safeNumber(value.confidence),
+    queriedAt: safeString(value.queriedAt) || null,
+    expiresAt: safeString(value.expiresAt) || null,
+    sources: Array.isArray(value.sources) ? value.sources.slice(0, 8) : []
   };
 }
 
@@ -1364,10 +1927,20 @@ function applyBootstrap(rawData) {
   state.version = data.version;
   state.engineVersion = data.engineVersion;
   state.definitionsVersion = data.definitionsVersion;
+  state.definitions = data.definitions;
+  state.threatIntel = data.threatIntel;
   state.settings = data.settings;
   state.quarantine = data.quarantine;
   state.quarantineInventory = data.quarantineInventory;
   state.results = data.results;
+  state.reportAvailable = data.reportAvailable;
+  state.network = data.network;
+  state.networkProtection = data.networkProtection;
+  state.edr = data.edr;
+  state.exposure = data.exposure;
+  state.integrity = data.integrity;
+  state.health = data.health;
+  state.performance = data.performance;
   state.activity = data.activity;
   state.lastScan = data.lastScan;
   state.totalScanned = data.totalScanned;
@@ -1377,6 +1950,11 @@ function applyBootstrap(rawData) {
     targetLabel: safeString(data.protection.targetLabel, 'Descargas'),
     autoQuarantine: Boolean(data.protection.autoQuarantine),
     sessionOnly: data.protection.sessionOnly !== false
+  };
+  state.ransomwareAudit = {
+    mode: 'audit', configured: Boolean(data.ransomwareAudit.configured), enabled: Boolean(data.ransomwareAudit.enabled), paused: Boolean(data.ransomwareAudit.paused), blocking: false,
+    rootsConfigured: safeNumber(data.ransomwareAudit.rootsConfigured), rootsObserved: safeNumber(data.ransomwareAudit.rootsObserved),
+    canariesActive: safeNumber(data.ransomwareAudit.canariesActive), recentAlerts: Array.isArray(data.ransomwareAudit.recentAlerts) ? data.ransomwareAudit.recentAlerts.slice(0, 20) : []
   };
   state.startup = {
     supported: data.startup.supported !== false,
@@ -1397,16 +1975,64 @@ function applyBootstrap(rawData) {
   els['engine-version'].textContent = data.engineVersion;
   els['definitions-version'].textContent = data.definitionsVersion;
   els['about-definitions'].textContent = data.definitionsVersion;
+  renderDefinitionUpdates();
   els['theme-select'].value = data.settings.theme;
   els['auto-quarantine'].checked = data.settings.autoQuarantine;
+  els['ransomware-audit-enabled'].checked = data.settings.ransomwareAuditEnabled;
+  els['reputation-sharing-enabled'].checked = data.settings.reputationSharingEnabled;
+  els['network-protection-mode'].value = data.settings.networkProtectionMode;
+  syncScheduleSettings(data.settings);
   renderStartupSetting();
   applyTheme(data.settings.theme);
   renderHomeStatus();
   renderActivity();
   renderProtection();
+  renderRansomwareAudit();
   renderMonitor();
   renderResults();
+  renderNetwork();
+  renderEdr();
+  renderExposure();
+  renderIntegrity();
   renderQuarantine();
+  renderHealth();
+}
+
+function renderHealth() {
+  const health = state.health ?? {};
+  els['health-summary'].textContent = health.status === 'healthy' ? 'Los componentes supervisados funcionan correctamente.' : health.recoveredInterruptedOperation ? 'Aegis recuperó una operación interrumpida; revisa el último informe.' : 'Hay componentes que requieren revisión.';
+  els['health-ipc'].textContent = health.authenticatedWorkerIpc ? 'Autenticado' : 'No disponible';
+  els['health-protection'].textContent = health.protectionAvailable ? 'Disponible' : 'Degradada';
+  els['health-persistence'].textContent = health.statePersistenceAvailable ? 'Disponible' : 'Degradada';
+  els['health-ransomware'].textContent = state.settings.ransomwareAuditEnabled ? health.ransomwareAuditAvailable ? 'Auditoría disponible' : 'Degradada' : 'Desactivada';
+  els['health-self-protection'].textContent = health.selfProtectionAvailable ? 'Auditoría disponible' : 'No disponible';
+  const enginePerformance = state.performance?.engine ?? {};
+  const protectionPerformance = state.performance?.protection ?? {};
+  els['health-performance'].textContent = `${formatCount(enginePerformance.cacheEntries)} en caché · cola ${formatCount(protectionPerformance.queueDepth)}/${formatCount(protectionPerformance.queueLimit)}`;
+}
+
+function renderDefinitionUpdates() {
+  const updates = state.definitions?.updates ?? {};
+  const feed = updates.feed ?? {};
+  const source = updates.source === 'updated' ? 'Paquete firmado' : 'Incluida en la aplicación';
+  const signature = updates.signature?.status === 'verified' ? `Verificada${updates.signature.keyId ? ` · ${updates.signature.keyId}` : ''}` : 'No hay actualización firmada activa';
+  els['definition-update-version'].textContent = formatCount(updates.currentVersion || state.definitions?.version || 0);
+  els['definition-update-source'].textContent = source;
+  els['definition-update-signature'].textContent = signature;
+  els['rollback-definitions'].hidden = !updates.rollbackAvailable;
+  els['definition-update-copy'].textContent = updates.updateChannelConfigured
+    ? feed.configured
+      ? `Canal diario firmado${feed.host ? ` · ${feed.host}` : ''}. Se comprueba cada ${formatCount(feed.intervalHours)} h con caché condicional y sin descargar el paquete si no ha cambiado.`
+      : 'Puedes importar un paquete firmado; el canal diario aún no está configurado en esta compilación.'
+    : 'Las definiciones se cargan desde el paquete instalado. Falta configurar la clave pública de confianza para aceptar actualizaciones.';
+  els['check-definition-feed'].disabled = Boolean(feed.inFlight);
+  els['check-definition-feed'].textContent = feed.inFlight ? 'Comprobando definiciones…' : feed.configured ? 'Buscar definiciones ahora' : 'Canal diario no configurado';
+  const feedStatus = feed.lastError
+    ? `Aviso del canal: ${feed.lastError}`
+    : feed.lastCheckedAt
+      ? `Canal: ${feed.lastSuccessfulAt ? `última comprobación ${formatDate(feed.lastCheckedAt)}` : `último intento ${formatDate(feed.lastCheckedAt)}`}${feed.nextCheckAt ? ` · próxima ${formatDate(feed.nextCheckAt)}` : ''}`
+      : feed.configured ? 'Canal diario preparado; se comprobará cuando corresponda.' : '';
+  els['definition-update-status'].textContent = feedStatus || (updates.lastError ? `Último aviso: ${updates.lastError}` : updates.lastAppliedAt ? `Aplicada: ${formatDate(updates.lastAppliedAt)}` : updates.lastRollbackAt ? `Restaurada: ${formatDate(updates.lastRollbackAt)}` : '');
 }
 
 function bindEvents() {
@@ -1421,6 +2047,22 @@ function bindEvents() {
   els['start-monitor'].addEventListener('click', () => void startMonitor());
   els['stop-monitor'].addEventListener('click', () => void stopMonitor());
   els['refresh-quarantine'].addEventListener('click', () => void refreshQuarantine());
+  els['export-report-json'].addEventListener('click', () => void exportReport('json'));
+  els['export-report-csv'].addEventListener('click', () => void exportReport('csv'));
+  els['run-network-audit'].addEventListener('click', () => void runNetworkAudit());
+  els['export-network-json'].addEventListener('click', () => void exportNetworkReport('json'));
+  els['export-network-csv'].addEventListener('click', () => void exportNetworkReport('csv'));
+  els['apply-network-protection'].addEventListener('click', () => void applyNetworkProtection());
+  els['remove-network-protection'].addEventListener('click', () => void removeNetworkProtection());
+  els['network-protection-mode'].addEventListener('change', () => void saveSettings());
+  els['run-edr-audit'].addEventListener('click', () => void runEdrAudit());
+  els['export-edr-report'].addEventListener('click', () => void exportEdrReport());
+  els['run-exposure-audit'].addEventListener('click', () => void runExposureAudit());
+  els['export-exposure-json'].addEventListener('click', () => void exportExposureReport('json'));
+  els['export-exposure-csv'].addEventListener('click', () => void exportExposureReport('csv'));
+  els['run-integrity-audit'].addEventListener('click', () => void runIntegrityAudit());
+  els['export-integrity-json'].addEventListener('click', () => void exportIntegrityReport('json'));
+  els['export-integrity-csv'].addEventListener('click', () => void exportIntegrityReport('csv'));
 
   for (const button of all('.filter-button')) {
     button.addEventListener('click', () => {
@@ -1436,7 +2078,12 @@ function bindEvents() {
 
   els['theme-select'].addEventListener('change', () => void saveSettings());
   els['auto-quarantine'].addEventListener('change', () => void saveSettings());
+  els['ransomware-audit-enabled'].addEventListener('change', () => void saveSettings());
+  els['reputation-sharing-enabled'].addEventListener('change', () => void saveSettings());
   els['start-with-windows'].addEventListener('change', () => void saveSettings());
+  for (const id of ['scheduled-scan-enabled', 'scheduled-scan-mode', 'scheduled-scan-hour', 'scheduled-scan-battery']) {
+    els[id].addEventListener('change', () => void saveSettings());
+  }
   els['theme-cycle'].addEventListener('click', () => {
     const order = ['system', 'light', 'dark'];
     els['theme-select'].value = order[(order.indexOf(state.settings.theme) + 1) % order.length];
@@ -1444,6 +2091,9 @@ function bindEvents() {
   });
   els['check-updates'].addEventListener('click', () => void checkForUpdates());
   els['restart-update'].addEventListener('click', () => void restartAndUpdate());
+  els['import-definition-bundle'].addEventListener('click', () => void importDefinitionBundle());
+  els['check-definition-feed'].addEventListener('click', () => void checkDefinitionFeed());
+  els['rollback-definitions'].addEventListener('click', () => void rollbackDefinitions());
   els['run-simulation'].addEventListener('click', () => void runSimulation());
   els['restore-cancel'].addEventListener('click', () => els['restore-dialog'].close());
   els['restore-confirm'].addEventListener('click', () => void confirmRestore());
@@ -1499,7 +2149,8 @@ async function initialize() {
 
 function createPreviewBridge() {
   const listeners = new Set();
-  let previewSettings = { theme: 'system', autoQuarantine: false, launchAtStartup: true };
+  let previewSettings = { theme: 'system', autoQuarantine: false, launchAtStartup: true, scheduledScanEnabled: false, scheduledScanMode: 'quick', scheduledScanHour: 3, skipScheduledScanOnBattery: true, ransomwareAuditEnabled: false, networkProtectionMode: 'audit', reputationSharingEnabled: false };
+  let previewNetworkProtection = { mode: 'audit', active: false, addressesBlocked: 0, domainsPending: 0, skippedDomains: [], rules: [], reversible: true };
   let previewProtection = { active: true, paused: false, targetLabel: 'Descargas', autoQuarantine: false, sessionOnly: true };
   let scanSequence = 0;
   let monitorActive = false;
@@ -1566,6 +2217,7 @@ function createPreviewBridge() {
     const report = {
       status: 'completed', scanId: previewScanId, mode, completedAt: new Date().toISOString(), targetLabel: label, results,
       resultsTruncated: exhaustive ? Math.max(0, total - results.length) : 0,
+      reportAvailable: true,
       summary: {
         scanned: total, total,
         malicious: simulation ? 1 : 0,
@@ -1584,13 +2236,22 @@ function createPreviewBridge() {
   return Object.freeze({
     async getBootstrap() {
       return {
-        app: { version: '0.2.0-preview' },
-        engine: { version: '0.2.0' },
-        definitions: { version: '2026.08.18-local' },
+        app: { version: '0.11.0-preview' },
+        engine: { version: '0.11.0' },
+        definitions: { version: '2026.08.18-local', updates: { currentVersion: 3, bundledVersion: 3, source: 'bundled', signature: { status: 'bundled', keyId: null }, rollbackAvailable: false, updateChannelConfigured: false, feed: { enabled: false, configured: false, due: false, inFlight: false } } },
         settings: previewSettings,
         protection: previewProtection,
+        ransomwareAudit: {mode:'audit',configured:previewSettings.ransomwareAuditEnabled,enabled:previewSettings.ransomwareAuditEnabled,paused:false,blocking:false,rootsConfigured:3,rootsObserved:previewSettings.ransomwareAuditEnabled?3:0,canariesActive:previewSettings.ransomwareAuditEnabled?3:0,recentAlerts:[]},
         startup: { supported: true, enabled: previewSettings.launchAtStartup, requested: previewSettings.launchAtStartup, launchesInBackground: true },
         stats: { totalScanned: 148 },
+        reportAvailable: true,
+        health: {status:'healthy',authenticatedWorkerIpc:true,protectionAvailable:true,statePersistenceAvailable:true,recoveredInterruptedOperation:false,ransomwareAuditAvailable:true},
+        performance: {engine:{fileScans:148,cacheHits:32,cacheMisses:116,cacheEntries:12,cacheMaxEntries:512,bytesRead:7340032,peakWorkingBufferBytes:1179648},protection:{active:true,pendingEvents:0,queueDepth:0,queueLimit:128},monitor:{active:false,pendingEvents:0,queueDepth:0,queueLimit:128},runtime:{rssBytes:73400320,heapUsedBytes:25165824}},
+        networkProtection: previewNetworkProtection,
+        network: { completedAt:'2026-08-20T09:30:00.000Z',reportAvailable:true,summary:{connections:2,suspicious:0,unsignedProcesses:0,anomalous:0,repeatedDestinations:0,portScanPatterns:0,probableExfiltration:0,truncated:false},protection:previewNetworkProtection,windowsSecurity:{firewall:[{name:'Domain',enabled:true},{name:'Private',enabled:true},{name:'Public',enabled:true}],defender:{antivirusEnabled:true,realTimeProtectionEnabled:true,networkInspectionEnabled:true}},events:[{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'162.159.135.234',remotePort:443,domain:'discord.com',process:{id:4120,name:'Discord',path:'C:\\Usuarios\\Demo\\AppData\\Local\\Discord\\Discord.exe'},signature:{status:'valid',publisher:'Discord Inc.'},anomalies:[],anomalySeverity:'info'},{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'20.190.160.1',remotePort:443,domain:'login.microsoftonline.com',process:{id:1052,name:'msedge',path:'C:\\Program Files\\Microsoft\\Edge\\msedge.exe'},signature:{status:'valid',publisher:'Microsoft Corporation'},anomalies:[],anomalySeverity:'info'}]},
+        edr: { available:true,source:'windows-powershell',completedAt:'2026-08-20T09:34:00.000Z',reportAvailable:true,summary:{processes:84,processTreeEdges:61,persistenceArtifacts:17,timelineEvents:4,incidents:1,suspicious:1,truncated:false},limitations:['Instantánea bajo demanda; no es telemetría ETW continua.','Los eventos de archivos no se atribuyen a un proceso sin telemetría nativa.'],events:[{id:'f53ca7af-6d10-4d14-9b08-b55f76d3d4f0',at:'2026-08-20T09:33:58.000Z',kind:'process',severity:'medium',verdict:'suspicious',title:'Proceso con indicios: powershell.exe',explanation:'Contiene indicadores de ofuscación o ejecución dinámica.',techniqueIds:['T1059.001','T1027'],techniqueLabels:['PowerShell','Obfuscated Files or Information'],process:{attributed:true,pid:4120,name:'powershell.exe',path:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',reason:'PID presente en la instantánea EDR'},artifact:null,action:'observed-only'}],incidents:[{id:'e65edb61-8ad7-4b61-b60e-ccf566563b1a',at:'2026-08-20T09:33:58.000Z',severity:'medium',title:'Proceso con indicios: powershell.exe',status:'observed',eventCount:1,eventIds:['f53ca7af-6d10-4d14-9b08-b55f76d3d4f0'],techniqueIds:['T1059.001','T1027'],techniqueLabels:['PowerShell','Obfuscated Files or Information'],process:{attributed:true,pid:4120,name:'powershell.exe'},response:{mode:'audit',blocking:false,terminationAvailable:false,removalAvailable:false,quarantineAvailable:false}}],response:{mode:'audit',blocking:false,terminationAvailable:false,removalAvailable:false,quarantineAvailable:false}},
+        exposure: { available:true, source:'windows-powershell', completedAt:'2026-08-20T09:38:00.000Z', reportAvailable:true, summary:{removableDevices:1,applications:38,applicationsWithoutVersion:2,applicationsWithoutPublisher:1,unsafeSettings:0,privacyEntries:4,policyIndicators:0,expiredExceptions:0,truncated:false}, devices:[{id:'drive:E:',drive:'E:',label:'USB de prueba',fileSystem:'exFAT',sizeBytes:32000000000,freeBytes:18000000000,provider:'',status:'observed',control:'audit-only'}], applications:[{name:'Discord',publisher:'Discord Inc.',version:'1.0.9194',installLocation:'C:\\Users\\Demo\\AppData\\Local\\Discord',policy:{status:'unmatched',severity:'info',enforcement:'audit-only',explanation:'Inventario local sin una decisión de seguridad automática.'}},{name:'FACEIT Anti-cheat',publisher:'FACEIT',version:'2.1.0',installLocation:'C:\\Program Files\\FACEIT',policy:{status:'unmatched',severity:'info',enforcement:'audit-only',explanation:'Inventario local sin una decisión de seguridad automática.'}}],unsafeSettings:[],privacy:[{capability:'webcam',app:'(global)',decision:'allowed',lastUsed:null,severity:'low',explanation:'Consentimiento de Windows concedido; no implica uso activo.'},{capability:'microphone',app:'Discord',decision:'allowed',lastUsed:'2026-08-19T10:00:00.000Z',severity:'info',explanation:'Consentimiento de Windows concedido; no implica uso activo.'}],policies:{mode:'audit',publishers:[],hashes:[],exceptions:[],expiredExceptions:[],enforcementAvailable:false,blocking:false},limitations:['Instantánea local bajo demanda; no hay control continuo de dispositivos.','No se desinstalan aplicaciones ni se modifican Firewall, Defender, UAC o privacidad.']},
+        integrity: { available:true, source:'local-manifest', completedAt:'2026-08-20T09:42:00.000Z', reportAvailable:true, manifestVersion:'2026.08.20-local', manifestGeneratedAt:'2026-08-20T09:30:00.000Z', signature:{status:'not-configured',algorithm:null}, summary:{total:12,verified:12,modified:0,missing:0,untracked:0,healthy:true,truncated:false}, items:[{path:'src/engine.mjs',status:'verified',expectedSha256:'a'.repeat(64),actualSha256:'a'.repeat(64),sizeBytes:240000}], limitations:['La línea base local no sustituye una firma de código ni una raíz de confianza del sistema.'], enforcement:{mode:'audit',blocking:false,repairAvailable:false,serviceProtected:false} },
         lastScan: {
           completedAt: '2026-08-18T08:35:00.000Z',
           summary: { scanned: 24, total: 24, malicious: 0, suspicious: 0, errors: 0, quarantined: 0 }
@@ -1636,6 +2297,69 @@ function createPreviewBridge() {
       emit({ type: 'quarantine-updated' });
       return { label: 'Documentos · Archivo restaurado' };
     },
+    async showQuarantinePath({ id } = {}) {
+      if (!safeString(id)) throw new Error('Identificador no válido.');
+      return { shown: true };
+    },
+    async exportReport({ format } = {}) {
+      if (!['json', 'csv'].includes(format)) throw new Error('Formato no válido.');
+      return { cancelled: false, format, count: 24, label: `Aegis-Guard-informe-preview.${format}` };
+    },
+    async runNetworkAudit() {
+      await delay(350);
+      return { completedAt:new Date().toISOString(),reportAvailable:true,summary:{connections:2,suspicious:0,unsignedProcesses:0,anomalous:0,repeatedDestinations:0,portScanPatterns:0,probableExfiltration:0,truncated:false},protection:previewNetworkProtection,windowsSecurity:{firewall:[{name:'Domain',enabled:true},{name:'Private',enabled:true},{name:'Public',enabled:true}],defender:{antivirusEnabled:true,realTimeProtectionEnabled:true,networkInspectionEnabled:true}},events:[{verdict:'observed',explanation:'Conexión saliente observada; no coincide con los indicadores locales disponibles.',protocol:'tcp',remoteAddress:'162.159.135.234',remotePort:443,domain:'discord.com',process:{id:4120,name:'Discord',path:'C:\\Usuarios\\Demo\\AppData\\Local\\Discord\\Discord.exe'},signature:{status:'valid',publisher:'Discord Inc.'},anomalies:[],anomalySeverity:'info'}]};
+    },
+    async applyNetworkProtection() {
+      await delay(300);
+      if (previewSettings.networkProtectionMode !== 'block') throw new Error('Activa primero el modo de bloqueo reversible.');
+      previewNetworkProtection = { ...previewNetworkProtection, mode: 'block', active: true, addressesBlocked: 2, rules: ['Aegis Guard Indicator 203.0.113.10', 'Aegis Guard Indicator 198.51.100.4'] };
+      return { ...previewNetworkProtection };
+    },
+    async removeNetworkProtection() {
+      await delay(180);
+      previewNetworkProtection = { ...previewNetworkProtection, active: false, addressesBlocked: 0, rules: [] };
+      return { ...previewNetworkProtection };
+    },
+    async runEdrAudit() {
+      await delay(420);
+      return { available:true,source:'windows-powershell',completedAt:new Date().toISOString(),reportAvailable:true,summary:{processes:84,processTreeEdges:61,persistenceArtifacts:17,timelineEvents:4,incidents:1,suspicious:1,truncated:false},limitations:['Instantánea bajo demanda; no es telemetría ETW continua.','Los eventos de archivos no se atribuyen a un proceso sin telemetría nativa.'],events:[{id:'f53ca7af-6d10-4d14-9b08-b55f76d3d4f0',at:new Date().toISOString(),kind:'process',severity:'medium',verdict:'suspicious',title:'Proceso con indicios: powershell.exe',explanation:'Contiene indicadores de ofuscación o ejecución dinámica.',techniqueIds:['T1059.001','T1027'],techniqueLabels:['PowerShell','Obfuscated Files or Information'],process:{attributed:true,pid:4120,name:'powershell.exe',path:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',reason:'PID presente en la instantánea EDR'},artifact:null,action:'observed-only'}],incidents:[],response:{mode:'audit',blocking:false,terminationAvailable:false,removalAvailable:false,quarantineAvailable:false},jsonFile:'edr-preview.json'};
+    },
+    async exportEdrReport() {
+      return {cancelled:false,format:'json',count:4,label:'Aegis-Guard-EDR-preview.json'};
+    },
+    async runExposureAudit() {
+      await delay(360);
+      return { available:true, source:'windows-powershell', completedAt:new Date().toISOString(), reportAvailable:true, summary:{removableDevices:1,applications:38,applicationsWithoutVersion:2,applicationsWithoutPublisher:1,unsafeSettings:0,privacyEntries:4,policyIndicators:0,expiredExceptions:0,truncated:false}, devices:[{id:'drive:E:',drive:'E:',label:'USB de prueba',fileSystem:'exFAT',sizeBytes:32000000000,freeBytes:18000000000,provider:'',status:'observed',control:'audit-only'}], applications:[{name:'Discord',publisher:'Discord Inc.',version:'1.0.9194',installLocation:'C:\\Users\\Demo\\AppData\\Local\\Discord',policy:{status:'unmatched',severity:'info',enforcement:'audit-only',explanation:'Inventario local sin una decisión de seguridad automática.'}}], unsafeSettings:[], privacy:[], policies:{mode:'audit',publishers:[],hashes:[],exceptions:[],expiredExceptions:[],enforcementAvailable:false,blocking:false}, limitations:['Instantánea local bajo demanda; no hay control continuo de dispositivos.']};
+    },
+    async exportExposureReport({ format } = {}) {
+      if (!['json','csv'].includes(format)) throw new Error('Formato no válido.');
+      return { cancelled:false, format, count:38, label:`Aegis-Guard-exposicion-preview.${format}` };
+    },
+    async runIntegrityAudit() {
+      await delay(260);
+      return { available:true, source:'local-manifest', completedAt:new Date().toISOString(), reportAvailable:true, manifestVersion:'2026.08.20-local', signature:{status:'not-configured',algorithm:null}, summary:{total:12,verified:12,modified:0,missing:0,untracked:0,healthy:true,truncated:false}, items:[], limitations:['La línea base local no sustituye una firma de código ni una raíz de confianza del sistema.'], enforcement:{mode:'audit',blocking:false,repairAvailable:false,serviceProtected:false} };
+    },
+    async exportIntegrityReport({ format } = {}) {
+      if (!['json','csv'].includes(format)) throw new Error('Formato no válido.');
+      return { cancelled:false, format, count:12, label:`Aegis-Guard-integridad-preview.${format}` };
+    },
+    async importDefinitionBundle() {
+      await delay(180);
+      throw new Error('La vista previa no puede abrir archivos locales. Usa la aplicación instalada.');
+    },
+    async rollbackDefinitions() {
+      throw new Error('No hay una definición anterior en la vista previa.');
+    },
+    async checkDefinitionFeed() {
+      return { currentVersion: 3, bundledVersion: 3, source: 'bundled', signature: { status: 'bundled', keyId: null }, rollbackAvailable: false, updateChannelConfigured: false, feed: { enabled: false, configured: false, due: false, inFlight: false }, feedResult: 'not-configured' };
+    },
+    async queryThreatIntel() {
+      throw new Error('La consulta de reputación solo está disponible en la aplicación instalada.');
+    },
+    async exportNetworkReport({ format } = {}) {
+      if (!['json','csv'].includes(format)) throw new Error('Formato no válido.');
+      return {cancelled:false,format,count:2,label:`Aegis-Guard-red-preview.${format}`};
+    },
     async isolateResult({ scanId, resultId } = {}) {
       if (!safeString(scanId) || !safeString(resultId)) throw new Error('Identificador no válido.');
       const result = cleanResults.find(item => item.resultId === resultId);
@@ -1676,8 +2400,17 @@ function createPreviewBridge() {
       previewSettings = {
         theme: ['system', 'light', 'dark'].includes(settings?.theme) ? settings.theme : 'system',
         autoQuarantine: settings?.autoQuarantine === true,
-        launchAtStartup: settings?.launchAtStartup !== false
+        launchAtStartup: settings?.launchAtStartup !== false,
+        scheduledScanEnabled: settings?.scheduledScanEnabled === true,
+        scheduledScanMode: settings?.scheduledScanMode === 'full' ? 'full' : 'quick',
+        scheduledScanHour: Number.isSafeInteger(settings?.scheduledScanHour) ? settings.scheduledScanHour : 3,
+        skipScheduledScanOnBattery: settings?.skipScheduledScanOnBattery !== false,
+        ransomwareAuditEnabled: settings?.ransomwareAuditEnabled === true,
+        networkProtectionMode: settings?.networkProtectionMode === 'block' ? 'block' : 'audit',
+        reputationSharingEnabled: settings?.reputationSharingEnabled === true
       };
+      previewNetworkProtection = { ...previewNetworkProtection, mode: previewSettings.networkProtectionMode };
+      emit({type:'ransomware-audit-state',mode:'audit',configured:previewSettings.ransomwareAuditEnabled,enabled:previewSettings.ransomwareAuditEnabled,paused:false,blocking:false,rootsConfigured:3,rootsObserved:previewSettings.ransomwareAuditEnabled?3:0,canariesActive:previewSettings.ransomwareAuditEnabled?3:0,recentAlerts:[]});
       return { settings: { ...previewSettings } };
     },
     async createAndScanSimulation() {

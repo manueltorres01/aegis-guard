@@ -1,0 +1,12 @@
+{
+  "version": "2026.08.20-local",
+  "mode": "audit",
+  "publishers": [
+    "Discord Inc.",
+    "FACEIT",
+    "Advanced Micro Devices, Inc.",
+    "Microsoft Corporation"
+  ],
+  "hashes": [],
+  "exceptions": []
+}

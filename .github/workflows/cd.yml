@@ -1,0 +1,84 @@
+name: CD
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: signed-windows-draft
+    runs-on: windows-latest
+    timeout-minutes: 35
+    environment: release
+    permissions:
+      contents: write
+    env:
+      # electron-builder accepts the generic CSC names. The WIN_* aliases are
+      # kept for compatibility with the documented repository secret names.
+      CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify release ref
+        shell: pwsh
+        run: |
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Release tags must point to a commit already contained in main.' }
+          $packageVersion = node -p "require('./package.json').version"
+          if ($env:GITHUB_REF_NAME -ne "v$packageVersion") { throw "Tag $env:GITHUB_REF_NAME does not match package version v$packageVersion." }
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run release checks
+        run: npm run ci
+      - name: Require protected signing credentials
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CSC_LINK) -or [string]::IsNullOrWhiteSpace($env:CSC_KEY_PASSWORD)) {
+            throw 'Missing WIN_CSC_LINK or WIN_CSC_KEY_PASSWORD in the protected release environment.'
+          }
+      - name: Generate release integrity manifest
+        run: npm run integrity:manifest
+      - name: Build signed installer
+        run: npm exec -- electron-builder --config electron-builder.yml --win nsis --x64 --publish never
+      - name: Verify signed release artifacts
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath dist -Filter "Aegis-Guard-Setup-$($env:GITHUB_REF_NAME.TrimStart('v'))-x64.exe" | Select-Object -First 1
+          if (-not $installer) { throw 'The signed NSIS installer was not produced.' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if ($signature.Status -ne 'Valid') { throw "Installer signature status was $($signature.Status), expected Valid." }
+          $blockmap = Join-Path $installer.DirectoryName "$($installer.Name).blockmap"
+          $latest = Join-Path $installer.DirectoryName 'latest.yml'
+          foreach ($required in @($blockmap, $latest)) { if (-not (Test-Path -LiteralPath $required)) { throw "Missing release metadata: $required" } }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash
+          "::notice title=Signed installer::$($installer.Name) SHA-256 $hash"
+          "installer=$($installer.FullName)" | Out-File -FilePath "$env:GITHUB_WORKSPACE\release-assets.txt" -Encoding utf8
+      - name: Generate SPDX SBOM
+        run: npm run sbom
+      - name: Create draft GitHub release
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $installer = "dist\Aegis-Guard-Setup-$version-x64.exe"
+          $blockmap = "$installer.blockmap"
+          $sbom = "dist\aegis-guard-$version.spdx.json"
+          if (-not (Test-Path -LiteralPath $sbom)) { throw "Missing SPDX SBOM: $sbom" }
+          gh release create $env:GITHUB_REF_NAME $installer $blockmap 'dist\latest.yml' $sbom --repo $env:GITHUB_REPOSITORY --verify-tag --draft --title "Aegis Guard $env:GITHUB_REF_NAME" --generate-notes

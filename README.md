@@ -7,9 +7,17 @@ Aegis Guard is an auditable malware-scanning MVP for Windows with both a command
 
 ## Highlights
 
-- SHA-256 and encoded literal signatures
+- SHA-256, encoded literal and constrained YARA-compatible hex signatures
 - Explainable detection scoring
 - Heuristics for disguised executables, suspicious scripts, macro auto-execution, ransomware commands and packed files
+- Bounded PE structural analysis, ZIP/Office metadata inspection and separate PUA classification
+- Authenticode publisher, chain/revocation evidence, timestamp identity and application provenance
+- Optional ransomware audit for rapid changes, deletions, appended extensions and identifiable canary documents
+- On-demand local EDR audit for bounded process trees, startup persistence, scheduled tasks, services and explainable MITRE ATT&CK correlations
+- Read-only network anomaly indicators plus an explicit, reversible Windows Firewall action for validated IP indicators
+- Read-only exposure inventory for removable volumes, installed applications, Windows defensive settings and camera/microphone consent
+- Release-time SHA-256 integrity audit for security components, with local audit trail and JSON/CSV evidence
+- Resource-bounded scanning with identity-aware session caching, coalesced watcher queues and measured performance diagnostics
 - Concurrent directory scanning with safe exclusions and symbolic-link avoidance
 - Modern Spanish desktop dashboard with light, dark and system themes
 - Cancelable scans with discovery and scanning progress
@@ -41,7 +49,7 @@ The demo creates a plain-text simulation in the operating system's temporary dir
 
 ## Desktop interface
 
-The interface includes **Inicio**, **Analizar**, **Protección**, **Resultados**, **Cuarentena** and **Ajustes**. It deliberately says “Sin amenazas detectadas por Aegis” instead of claiming that the whole computer is protected. Folder monitoring works only while Aegis Guard remains open.
+The interface includes **Inicio**, **Analizar**, **Protección**, **Red**, **Incidentes**, **Resultados**, **Cuarentena** and **Ajustes**. It deliberately says “Sin amenazas detectadas por Aegis” instead of claiming that the whole computer is protected. Folder monitoring continues in the user session when the window is hidden to the Windows tray. **Incidentes** is an on-demand, read-only audit snapshot; it does not terminate processes or remove persistence.
 
 Review the interface without Electron or access to real files:
 
@@ -65,7 +73,7 @@ Desktop quarantine, settings and activity live under the per-user application-da
 
 Each desktop session starts with protection for the Windows **Downloads** folder active. Browser partial files ending in `.crdownload` or `.part` are ignored until they receive their final name; stable `.tmp`, `.partial` and `.download` files are not excluded merely by suffix. Once eligible, a watched regular file is read exhaustively in chunks without Quick scan's 128 MiB cap. Pausing protection also pauses any manually selected folder monitor, but does not cancel a scan that is already running; the pause is deliberately session-only and protection starts active again after relaunch. **Launch at startup** is applied only by the packaged application, not by the development shell or UI preview.
 
-Desktop scan modes have deliberately different scope: **Quick** scans regular files only at the top level of Downloads, **Deep** recursively scans one natively selected file or folder, and **Full** streams accessible regular files on the ready, local lettered drives Windows enumerates. Deep and Full include hidden items and do not impose a file-count or file-size cutoff, but they never follow symbolic links, junctions or other reparse points. Only the quarantine vault and exactly registered active staging files are excluded; unrelated files under Aegis's data directory remain in scope. Full scans can take a long time; Windows may deny protected paths, which are counted separately while accessible content continues. If Windows cannot enumerate the drive set, Full fails explicitly and never silently degrades to scanning only `C:`. See [docs/DESKTOP-USAGE.md](docs/DESKTOP-USAGE.md) for exact behavior and reporting limits.
+Desktop scan modes have deliberately different scope: **Quick** scans regular files only at the top level of Downloads, **Deep** recursively scans one natively selected file or folder, and **Full** streams accessible regular files on the ready, local lettered drives Windows enumerates. Deep and Full include hidden items and do not impose a file-count or file-size cutoff, but they never follow symbolic links, junctions or other reparse points. The quarantine vault, complete-report store and exactly registered active staging files are excluded; unrelated files under Aegis's data directory remain in scope. Full scans can take a long time; Windows may deny protected paths, which are counted separately while accessible content continues. If Windows cannot enumerate the drive set, Full fails explicitly and never silently degrades to scanning only `C:`. See [docs/DESKTOP-USAGE.md](docs/DESKTOP-USAGE.md) for exact behavior and reporting limits.
 
 ## Usage
 
@@ -135,7 +143,7 @@ The supported distribution format is a signed, per-user NSIS installer—not a p
 npm run dist:win
 ```
 
-For local smoke testing only, `npm run dist:win:unsigned` overrides the production signing requirement. Never publish that unsigned output. Application updates use signed GitHub Release assets and require an explicit **Reiniciar y actualizar** action; definitions remain bundled until an independently signed, rollback-safe definition protocol exists. See [docs/DESKTOP-BUILD.md](docs/DESKTOP-BUILD.md) for exact release and signing steps.
+For local smoke testing only, `npm run dist:win:unsigned` overrides the production signing requirement. Never publish that unsigned output. Application updates use signed GitHub Release assets and require an explicit **Reiniciar y actualizar** action. Definition updates use the 0.10.0/0.11.0 Ed25519 envelope, manual import, minimum-version check and bounded rollback path; the default public-key trust store remains empty until a release key is provisioned. The repository now includes a serverless GitHub Actions collector that refreshes MalwareBazaar/ThreatFox hashes into `feeds/definitions.bundle.json`; it uses Actions secrets, never ships provider credentials and requires no Aegis server. Before packaging, `npm run release:readiness` validates the local release gates and `npm run sbom` creates an SPDX inventory from the locked dependencies. Until those secrets are provisioned, `npm run definitions:keygen` and `npm run definitions:bundle` exercise the same signed update path locally without contacting an external provider. See [docs/DESKTOP-BUILD.md](docs/DESKTOP-BUILD.md) for exact release and signing steps.
 
 ## Suspect a real infection?
 
@@ -143,18 +151,11 @@ Disconnect the machine from untrusted networks, avoid entering passwords, keep D
 
 ## Current limitations
 
-Aegis does not yet include a signed Windows minifilter driver, background Windows service, AMSI/ETW sensors, Authenticode reputation, archive unpacking, NTFS alternate-data-stream scanning, cloud intelligence, behavioral sandboxing, anti-tamper controls or a continuously curated signature feed. It does not inspect files stored inside archives, and its safe root confinement deliberately avoids reparse points and mount-only targets. Quick scans intentionally skip files larger than 128 MiB, and protection stops when the application closes even when **Launch at startup** is enabled. A forced process or system shutdown during isolation or restore can leave a recoverable staging file; a later Deep or Full scan treats an unregistered leftover as ordinary content rather than silently excluding it. High entropy and scripting patterns can have legitimate uses, so suspicious findings require human review.
+Aegis does not yet include a signed Windows minifilter driver, background Windows service, AMSI/ETW sensors, complete Authenticode reputation, archive unpacking, NTFS alternate-data-stream scanning, behavioral sandboxing or a signed anti-tamper root of trust. The daily signed intelligence collector exists but remains disabled until its public key, GitHub secrets and provider access are provisioned. Its optional reputation layer sends only an exact SHA-256 after explicit consent and uses CIRCL context plus opt-in abuse.ch providers; it does not upload files, use VirusTotal as a backend or turn an external “known file” result into a clean verdict. Its 0.7.0 network control is limited to explicit, reversible IP rules in Windows Firewall; it does not inspect URLs, isolate the whole host or mitigate volumetric DDoS attacks. The 0.8.0 exposure inventory is an on-demand, read-only snapshot: it does not block USB, uninstall applications, provide CVE/reputation verdicts from a version alone or intercept camera/microphone use. The 0.9.0 integrity audit detects differences against a release-time local manifest but does not repair or block tampering. It does not inspect files stored inside archives, and its safe root confinement deliberately avoids reparse points and mount-only targets. Quick scans intentionally skip files larger than 128 MiB; protection remains active while the packaged app is hidden in the tray and stops only when the user exits Aegis, signs out or shuts down Windows. A forced process or system shutdown during isolation or restore can leave a recoverable staging file; a later Deep or Full scan treats an unregistered leftover as ordinary content rather than silently excluding it. High entropy and scripting patterns can have legitimate uses, so suspicious findings require human review.
 
 ## Roadmap
 
-1. Export complete scan reports from **Results** to JSON and CSV, preserving paths, verdicts, scores, findings, actions, timestamps and scan summary
-2. Add **Results** filters for malicious, suspicious, file-analysis errors and skipped files, in addition to the existing overview
-3. Make **Restore** return quarantined files directly to their recorded original path without opening a destination picker, while retaining no-overwrite and path-safety protections
-4. Signed and rollback-safe definition updates
-5. PE parsing, Authenticode checks, archive scanning and YARA-compatible rules
-6. Least-privilege Windows service with AMSI/ETW integration
-7. Privacy-preserving reputation and behavioral correlation
-8. Corpus evaluation, fuzzing, external audit and reproducible signed releases
+Version 0.9.0 includes the earlier scan, quarantine, performance, network, EDR and exposure improvements and adds a bounded integrity audit, local audit trail and explicit reputation consent. It remains a user-session agent rather than a Windows SCM service; that privileged installation boundary must not be claimed until its installer, account ACLs and upgrade recovery have been independently validated. The ordered security and commercialization plan through 1.0.0 is maintained in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Security and contributing
 

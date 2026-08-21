@@ -1263,6 +1263,53 @@ svg {
   gap: 9px;
 }
 
+.network-policy-card {
+  margin-top: 14px;
+  padding: 18px 20px;
+}
+
+.exposure-policy-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 14px;
+  padding: 18px 20px;
+}
+
+.exposure-policy-card .settings-card-title {
+  min-width: 0;
+}
+
+.integrity-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 14px;
+  padding: 18px 20px;
+}
+
+.integrity-status-card .settings-card-title {
+  min-width: 0;
+}
+
+.network-policy-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.network-policy-controls .field-label {
+  margin: 0;
+}
+
+.network-policy-controls select {
+  width: auto;
+  min-width: 165px;
+}
+
 .session-warning {
   display: flex;
   align-items: flex-start;
@@ -1363,6 +1410,15 @@ svg {
   background: var(--surface);
   padding: 3px;
 }
+
+.results-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.compact-row { gap: 8px; }
 
 .filter-button {
   border-radius: 7px;

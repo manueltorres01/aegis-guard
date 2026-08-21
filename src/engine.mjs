@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { analyzeStaticContent } from './static-analysis.mjs';
 
 const EXECUTABLE = new Set(['.exe', '.dll', '.scr', '.com', '.msi', '.jar', '.ps1', '.vbs', '.js', '.jse', '.bat', '.cmd', '.hta']);
 const SCRIPT = new Set(['.ps1', '.vbs', '.js', '.jse', '.bat', '.cmd', '.hta']);
@@ -14,10 +15,27 @@ const SCRIPT_RULES = [
   [/(?:rundll32|regsvr32|mshta)\.exe\s+(?:https?:|javascript:)/i, 40, 'Living-off-the-land remote execution']
 ];
 const INJECTION_APIS = ['createremotethread', 'virtualallocex', 'writeprocessmemory'];
+const TRUST_DISCOUNTABLE = new Set([
+  'heuristic.entropy',
+  'heuristic.pe-api-combination',
+  'static.pe.rwx-section',
+  'static.pe.writable-entry'
+]);
 
 const DEFAULT_STREAM_CHUNK_BYTES = 1024 * 1024;
 const ENTROPY_SAMPLE_BYTES = 1024 * 1024;
 const SCRIPT_OVERLAP_BYTES = 4 * 1024;
+const STATIC_HEAD_BYTES = 8 * 1024 * 1024;
+const STATIC_PROBE_BYTES = 64 * 1024;
+const STATIC_TAIL_BYTES = 512 * 1024;
+const DEFAULT_CACHE_MAX_ENTRIES = 512;
+const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
+const DEEP_STATIC_EXTENSIONS = new Set([
+  ...AUTHENTICODE,
+  ...SCRIPT,
+  '.zip', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.jar', '.7z', '.rar'
+]);
+const TAIL_STATIC_EXTENSIONS = new Set(['.zip', '.docx', '.xlsx', '.pptx', '.jar']);
 
 function entropy(buffer) {
   if (!buffer.length) return 0;
@@ -40,7 +58,10 @@ export class ScanEngine {
     excludePaths = [],
     trustVerifier = null,
     trustedPublisherOrganizations = [],
-    isTransientPath = () => false
+    trustedApplicationPolicies = [],
+    isTransientPath = () => false,
+    cacheMaxEntries = DEFAULT_CACHE_MAX_ENTRIES,
+    cacheTtlMs = DEFAULT_CACHE_TTL_MS
   }) {
     if (typeof isTransientPath !== 'function') throw new TypeError('isTransientPath must be a function');
     this.definitions = definitions;
@@ -51,13 +72,38 @@ export class ScanEngine {
     this.isTransientPath = isTransientPath;
     this.trustVerifier = typeof trustVerifier === 'function' ? trustVerifier : null;
     this.trustedPublisherOrganizations = new Set(trustedPublisherOrganizations.map(normalizePublisher));
+    this.trustedApplicationPolicies = normalizeApplicationPolicies(trustedApplicationPolicies);
+    this.cacheNamespace = this.computeCacheNamespace();
+    this.cacheMaxEntries = clampInteger(cacheMaxEntries, 0, 4_096, DEFAULT_CACHE_MAX_ENTRIES);
+    this.cacheTtlMs = clampInteger(cacheTtlMs, 0, 60 * 60 * 1000, DEFAULT_CACHE_TTL_MS);
+    this.scanCache = new Map();
+    this.performance = {
+      fileScans: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      bytesRead: 0,
+      peakWorkingBufferBytes: 0
+    };
     this.patternRules = (definitions.patterns ?? []).map(rule => ({
       ...rule,
-      bytes: rule.literalBase64
-        ? Buffer.from(rule.literalBase64, 'base64')
-        : Buffer.from(String(rule.literal ?? ''), 'latin1')
+      ...compileDefinitionPattern(rule)
     })).filter(rule => rule.bytes.length > 0);
     this.patternOverlapBytes = Math.max(0, ...this.patternRules.map(rule => rule.bytes.length - 1));
+  }
+
+  replaceDefinitions(definitions) {
+    if (!definitions || typeof definitions !== 'object' || !Number.isSafeInteger(definitions.version)) {
+      throw new TypeError('Definitions are invalid');
+    }
+    this.definitions = definitions;
+    this.patternRules = (definitions.patterns ?? []).map(rule => ({
+      ...rule,
+      ...compileDefinitionPattern(rule)
+    })).filter(rule => rule.bytes.length > 0);
+    this.patternOverlapBytes = Math.max(0, ...this.patternRules.map(rule => rule.bytes.length - 1));
+    this.scanCache.clear();
+    this.cacheNamespace = this.computeCacheNamespace();
+    return { version: definitions.version, patterns: this.patternRules.length };
   }
 
   async scanFile(file, { signal, expectedIdentity } = {}) {
@@ -83,6 +129,16 @@ export class ScanEngine {
     if (firstStat.isSymbolicLink() || !firstStat.isFile()) throw new Error('Not a regular file');
     if (expectedIdentity && snapshotChanged(expectedIdentity, firstStat)) throw new Error('File changed after discovery');
 
+    this.performance.fileScans++;
+    const cacheKey = this.createCacheKey(file, firstStat, maximumBytes);
+    const cached = this.readCache(cacheKey);
+    if (cached) {
+      this.performance.cacheHits++;
+      cached.durationMs = elapsed(started);
+      return cached;
+    }
+    this.performance.cacheMisses++;
+
     const handle = await fs.open(file, 'r');
     try {
       const openedStat = await handle.stat();
@@ -101,10 +157,14 @@ export class ScanEngine {
       const script = SCRIPT.has(extension);
       const peLike = AUTHENTICODE.has(extension);
       const hash = crypto.createHash('sha256');
-      const buffer = Buffer.allocUnsafe(size);
+      const buffer = Buffer.allocUnsafe(Math.min(size, openedStat.size));
       const entropySample = executable
         ? Buffer.allocUnsafe(Math.min(openedStat.size, ENTROPY_SAMPLE_BYTES))
         : null;
+      let staticHead = null;
+      let staticHeadLength = 0;
+      let staticTail = Buffer.alloc(0);
+      let retainStaticTail = TAIL_STATIC_EXTENSIONS.has(extension);
       const matchedPatterns = new Set();
       const matchedScripts = new Set();
       const matchedInjectionApis = new Set();
@@ -119,17 +179,34 @@ export class ScanEngine {
         const { bytesRead } = await handle.read(buffer, 0, requested, position);
         if (bytesRead === 0) throw new Error('File changed during scanning');
         const chunk = buffer.subarray(0, bytesRead);
+        this.performance.bytesRead += bytesRead;
         hash.update(chunk);
+
+        if (!staticHead) {
+          const deepStatic = DEEP_STATIC_EXTENSIONS.has(extension) || hasSupportedStaticMagic(chunk);
+          staticHead = Buffer.allocUnsafe(Math.min(openedStat.size, deepStatic ? STATIC_HEAD_BYTES : STATIC_PROBE_BYTES));
+          retainStaticTail ||= isZipMagic(chunk);
+          this.performance.peakWorkingBufferBytes = Math.max(
+            this.performance.peakWorkingBufferBytes,
+            buffer.length + staticHead.length + (entropySample?.length ?? 0) + (retainStaticTail ? STATIC_TAIL_BYTES : 0)
+          );
+        }
 
         if (entropySample && entropyLength < entropySample.length) {
           const copied = Math.min(chunk.length, entropySample.length - entropyLength);
           chunk.copy(entropySample, entropyLength, 0, copied);
           entropyLength += copied;
         }
+        if (staticHeadLength < staticHead.length) {
+          const copied = Math.min(chunk.length, staticHead.length - staticHeadLength);
+          chunk.copy(staticHead, staticHeadLength, 0, copied);
+          staticHeadLength += copied;
+        }
+        if (retainStaticTail) staticTail = retainTail(staticTail, chunk, STATIC_TAIL_BYTES);
 
         const window = tail.length ? Buffer.concat([tail, chunk]) : chunk;
         for (let index = 0; index < this.patternRules.length; index++) {
-          if (!matchedPatterns.has(index) && window.includes(this.patternRules[index].bytes)) matchedPatterns.add(index);
+          if (!matchedPatterns.has(index) && patternMatches(window, this.patternRules[index])) matchedPatterns.add(index);
         }
         if (script || peLike) {
           const latin = window.toString('latin1');
@@ -172,10 +249,20 @@ export class ScanEngine {
       if (sample.length > 4096 && entropy(sample) > 7.65) {
         addFinding(result, 'heuristic.entropy', 'Unusually high entropy; file may be packed or encrypted', 18);
       }
+      const staticAnalysis = analyzeStaticContent({
+        file,
+        head: staticHead?.subarray(0, staticHeadLength) ?? Buffer.alloc(0),
+        tail: staticTail
+      });
+      result.staticAnalysis = staticAnalysis.metadata;
+      for (const finding of staticAnalysis.findings) addFinding(result, finding.id, finding.description, finding.score);
+      applyPuaClassification(result, this.definitions);
       if (peLike && this.trustVerifier && heuristicScore(result) >= 25) {
-        await applyAuthenticodeTrust(result, file, this.trustVerifier, this.trustedPublisherOrganizations);
+        await applyAuthenticodeTrust(result, file, this.trustVerifier, this.trustedPublisherOrganizations, this.trustedApplicationPolicies);
       }
-      return finalizeResult(result, started, this.definitions, this.threshold);
+      const finalized = finalizeResult(result, started, this.definitions, this.threshold);
+      this.writeCache(cacheKey, finalized);
+      return finalized;
     } finally {
       await handle.close();
     }
@@ -452,6 +539,71 @@ export class ScanEngine {
     const key = normalizePathKey(candidate);
     return excludePaths.some(excluded => key === excluded || key.startsWith(`${excluded}${path.sep}`));
   }
+
+  createCacheKey(file, stat, maximumBytes) {
+    const namespace = this.computeCacheNamespace();
+    if (namespace !== this.cacheNamespace) {
+      this.scanCache.clear();
+      this.cacheNamespace = namespace;
+    }
+    const resolved = normalizePathKey(path.resolve(file));
+    const limit = stat.size <= maximumBytes ? 'full' : Number.isFinite(maximumBytes) ? maximumBytes : 'all';
+    return [namespace, resolved, stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs, limit].join('|');
+  }
+
+  computeCacheNamespace() {
+    return JSON.stringify({
+      definitionsVersion: String(this.definitions?.version ?? ''),
+      threshold: this.threshold,
+      trustedPublishers: [...this.trustedPublisherOrganizations].sort(),
+      trustedApplications: this.trustedApplicationPolicies
+    });
+  }
+
+  readCache(key, now = Date.now()) {
+    if (!this.cacheMaxEntries || !this.cacheTtlMs) return null;
+    const entry = this.scanCache.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt <= now) {
+      this.scanCache.delete(key);
+      return null;
+    }
+    this.scanCache.delete(key);
+    this.scanCache.set(key, entry);
+    return structuredClone(entry.result);
+  }
+
+  writeCache(key, result, now = Date.now()) {
+    if (!this.cacheMaxEntries || !this.cacheTtlMs || result.verdict === 'skipped' || result.verdict === 'error') return;
+    this.scanCache.delete(key);
+    this.scanCache.set(key, { expiresAt: now + this.cacheTtlMs, result: structuredClone(result) });
+    while (this.scanCache.size > this.cacheMaxEntries) this.scanCache.delete(this.scanCache.keys().next().value);
+  }
+
+  getPerformanceMetrics() {
+    return {
+      ...this.performance,
+      cacheEntries: this.scanCache.size,
+      cacheMaxEntries: this.cacheMaxEntries,
+      cacheTtlMs: this.cacheTtlMs
+    };
+  }
+}
+
+function hasSupportedStaticMagic(buffer) {
+  return buffer.length >= 2 && buffer[0] === 0x4d && buffer[1] === 0x5a
+    || isZipMagic(buffer)
+    || buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from('d0cf11e0a1b11ae1', 'hex'))
+    || buffer.length >= 6 && buffer.subarray(0, 6).equals(Buffer.from('377abcaf271c', 'hex'))
+    || buffer.length >= 7 && buffer.subarray(0, 7).equals(Buffer.from('526172211a0700', 'hex'));
+}
+
+function isZipMagic(buffer) {
+  return buffer.length >= 4 && [0x04034b50, 0x06054b50, 0x08074b50].includes(buffer.readUInt32LE(0));
+}
+
+function clampInteger(value, minimum, maximum, fallback) {
+  return Number.isSafeInteger(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
 }
 
 function createResult(file, size) {
@@ -479,15 +631,25 @@ function finalizeResult(result, started, definitions, threshold) {
   if (known) addFinding(result, 'signature.sha256', known, 100);
   result.score = Math.max(0, Math.min(100, result.findings.reduce((sum, finding) => sum + finding.score, 0)));
   result.verdict = result.score >= threshold ? 'malicious' : result.score >= 25 ? 'suspicious' : 'clean';
+  if (result.classification === 'pua' && result.verdict === 'malicious' && !result.findings.some(finding => finding.id === 'signature.sha256')) result.verdict = 'suspicious';
   result.durationMs = elapsed(started);
   return result;
+}
+
+function applyPuaClassification(result, definitions) {
+  const matches = Array.isArray(definitions.puaSha256?.[result.sha256])
+    ? definitions.puaSha256[result.sha256]
+    : definitions.puaSha256?.[result.sha256] ? [definitions.puaSha256[result.sha256]] : [];
+  if (!matches.length) return;
+  result.classification = 'pua';
+  for (const description of matches.slice(0, 8)) addFinding(result, 'pua.sha256', String(description).slice(0, 500), 35);
 }
 
 function heuristicScore(result) {
   return result.findings.reduce((sum, finding) => sum + Math.max(0, finding.score), 0);
 }
 
-async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizations) {
+async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizations, trustedApplications) {
   try {
     const trust = await verifier(file, result.sha256);
     if (!trust || typeof trust !== 'object') return;
@@ -495,13 +657,30 @@ async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizatio
       status: String(trust.status ?? 'unknown').slice(0, 80),
       subject: String(trust.subject ?? '').slice(0, 500),
       organization: String(trust.organization ?? '').slice(0, 200),
-      isOsBinary: trust.isOsBinary === true
+      isOsBinary: trust.isOsBinary === true,
+      statusMessage: String(trust.statusMessage ?? '').slice(0, 300),
+      signatureType: String(trust.signatureType ?? '').slice(0, 80),
+      thumbprint: String(trust.thumbprint ?? '').slice(0, 100),
+      notBefore: String(trust.notBefore ?? '').slice(0, 80),
+      notAfter: String(trust.notAfter ?? '').slice(0, 80),
+      chainValid: trust.chainValid === true,
+      chainStatus: Array.isArray(trust.chainStatus) ? trust.chainStatus.map(value => String(value).slice(0, 80)).slice(0, 16) : [],
+      timestamped: trust.timestamped === true,
+      timestampSubject: String(trust.timestampSubject ?? '').slice(0, 500),
+      companyName: String(trust.companyName ?? '').slice(0, 200),
+      productName: String(trust.productName ?? '').slice(0, 200),
+      fileVersion: String(trust.fileVersion ?? '').slice(0, 100),
+      zoneId: Number.isSafeInteger(trust.zoneId) ? trust.zoneId : null,
+      origin: classifyOrigin(file)
     };
     const organization = normalizePublisher(result.trust.organization);
-    const lowConfidenceOnly = result.findings.every(finding =>
-      finding.id === 'heuristic.entropy' || finding.id === 'heuristic.pe-api-combination'
+    const lowConfidenceOnly = result.findings.every(finding => TRUST_DISCOUNTABLE.has(finding.id));
+    const trustedApplication = trustedApplications.some(policy =>
+      policy.publisher === organization && policy.roots.some(root => isPathWithin(root, file))
     );
-    const trustedSigner = result.trust.isOsBinary || trustedOrganizations.has(organization);
+    const trustedSigner = result.trust.isOsBinary || trustedOrganizations.has(organization) || trustedApplication;
+    result.trust.applicationVerified = trustedApplication;
+    result.trust.trustedPublisher = result.trust.status === 'valid' && trustedSigner;
     if (result.trust.status === 'valid' && trustedSigner && lowConfidenceOnly) {
       const discount = heuristicScore(result);
       const publisher = result.trust.organization || (result.trust.isOsBinary ? 'Microsoft Windows OS binary' : 'trusted publisher');
@@ -513,8 +692,36 @@ async function applyAuthenticodeTrust(result, file, verifier, trustedOrganizatio
   }
 }
 
+function classifyOrigin(file) {
+  const policies = [
+    ['windows', process.env.SystemRoot],
+    ['program-files', process.env.ProgramFiles],
+    ['program-files-x86', process.env['ProgramFiles(x86)']],
+    ['installed-user-application', process.env.LOCALAPPDATA]
+  ];
+  for (const [label, root] of policies) if (root && isPathWithin(root, file)) return label;
+  return 'other';
+}
+
 function normalizePublisher(value) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function normalizeApplicationPolicies(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(policy => ({
+    publisher: normalizePublisher(policy?.publisher),
+    roots: Array.isArray(policy?.roots) ? policy.roots.map(expandEnvironmentPath).filter(Boolean) : []
+  })).filter(policy => policy.publisher && policy.roots.length);
+}
+
+function expandEnvironmentPath(value) {
+  if (typeof value !== 'string' || !value) return null;
+  const expanded = value.replace(/%([^%]+)%/g, (_match, name) => {
+    const key = Object.keys(process.env).find(candidate => candidate.toLowerCase() === name.toLowerCase());
+    return key ? process.env[key] : '';
+  });
+  return path.isAbsolute(expanded) ? path.resolve(expanded) : null;
 }
 
 function elapsed(started) {
@@ -564,4 +771,37 @@ function normalizePathKey(value) {
   const root = path.parse(resolved).root;
   const withoutTrailing = resolved === root ? resolved : resolved.replace(/[\\/]+$/, '');
   return process.platform === 'win32' ? withoutTrailing.toLowerCase() : withoutTrailing;
+}
+
+function retainTail(previous, chunk, maximum) {
+  if (chunk.length >= maximum) return Buffer.from(chunk.subarray(chunk.length - maximum));
+  const combined = previous.length ? Buffer.concat([previous, chunk]) : Buffer.from(chunk);
+  return combined.length <= maximum ? combined : Buffer.from(combined.subarray(combined.length - maximum));
+}
+
+function compileDefinitionPattern(rule) {
+  if (typeof rule.hex === 'string') {
+    const tokens = rule.hex.trim().split(/\s+/);
+    return {
+      bytes: Buffer.from(tokens.map(token => token === '??' ? 0 : Number.parseInt(token, 16))),
+      mask: Buffer.from(tokens.map(token => token === '??' ? 0 : 0xff))
+    };
+  }
+  return {
+    bytes: rule.literalBase64
+      ? Buffer.from(rule.literalBase64, 'base64')
+      : Buffer.from(String(rule.literal ?? ''), 'latin1'),
+    mask: null
+  };
+}
+
+function patternMatches(buffer, rule) {
+  if (!rule.mask) return buffer.includes(rule.bytes);
+  outer: for (let offset = 0; offset <= buffer.length - rule.bytes.length; offset++) {
+    for (let index = 0; index < rule.bytes.length; index++) {
+      if (rule.mask[index] && buffer[offset + index] !== rule.bytes[index]) continue outer;
+    }
+    return true;
+  }
+  return false;
 }

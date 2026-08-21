@@ -5,6 +5,8 @@ export class UpdateService {
     this.isBusy = isBusy;
     this.status = app.isPackaged ? 'initializing' : 'unavailable';
     this.downloaded = false;
+    this.lastKnownGoodVersion = app.getVersion();
+    this.recoveryMode = false;
   }
 
   async initialize() {
@@ -50,10 +52,12 @@ export class UpdateService {
     });
     this.updater.on('update-downloaded', info => {
       this.downloaded = true;
+      this.recoveryMode = false;
       this.version = safeVersion(info?.version);
       this.setStatus('downloaded', { version: this.version });
     });
     this.updater.on('error', () => {
+      this.recoveryMode = true;
       this.setStatus('error', { message: 'No se pudo verificar o descargar la actualización firmada.' });
     });
   }
@@ -79,6 +83,11 @@ export class UpdateService {
       currentVersion: this.app.getVersion(),
       version: this.version,
       canInstall: this.canInstall(),
+      channel: 'stable',
+      staged: Boolean(this.downloaded),
+      rollbackReady: Boolean(this.downloaded && this.lastKnownGoodVersion),
+      recoveryMode: Boolean(this.recoveryMode),
+      signatureRequired: Boolean(this.app.isPackaged),
       message
     };
   }
