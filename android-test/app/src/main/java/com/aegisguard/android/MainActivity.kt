@@ -231,7 +231,7 @@ private fun AegisGuardApp(
                 scanMessage = "Analizando archivos localmente…"
                 val started = System.currentTimeMillis()
                 try {
-                    val summary = scanTree(context.contentResolver, Uri.parse(uriText)) { update ->
+                    val summary = scanTree(context, Uri.parse(uriText)) { update ->
                         scannedFiles = update.scanned
                         progress = (update.scanned.toFloat() / MAX_FILES).coerceAtMost(0.98f)
                     }
@@ -546,12 +546,12 @@ private fun SettingRow(title: String, description: String, checked: Boolean, onC
 }
 
 private suspend fun scanTree(
-    resolver: ContentResolver,
+    context: Context,
     rootUri: Uri,
     onProgress: suspend (ScanProgress) -> Unit
 ): ScanSummary = withContext(Dispatchers.IO) {
     val started = System.currentTimeMillis()
-    val root = DocumentFile.fromTreeUri(resolver, rootUri)
+    val root = DocumentFile.fromTreeUri(context, rootUri)
         ?: error("el proveedor no permite acceder a esta carpeta")
     val findings = mutableListOf<Finding>()
     var scanned = 0
@@ -576,7 +576,7 @@ private suspend fun scanTree(
             if (child.isDirectory) {
                 visit(child, depth + 1)
             } else if (child.isFile) {
-                findings += inspectFile(resolver, child)
+                findings += inspectFile(context.contentResolver, child)
                 scanned += 1
                 onProgress(ScanProgress(scanned, limited))
             }
