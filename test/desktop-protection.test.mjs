@@ -175,15 +175,16 @@ test('pause restores a pending manual monitor unless it is stopped while paused'
   await service.init();
 
   const started = await service.startMonitor(monitoredDirectory, { autoQuarantine: false });
+  const canonicalMonitor = await fs.realpath(monitoredDirectory);
   assert.equal(started.active, true);
-  assert.equal(service.watchService.session.root, path.resolve(monitoredDirectory));
+  assert.equal(service.watchService.session.root, canonicalMonitor);
 
   await service.pauseProtection();
   assert.equal(service.watchService.session, null);
   assert.equal(service.manualMonitorConfig.target, path.resolve(monitoredDirectory));
 
   await service.resumeProtection();
-  assert.equal(service.watchService.session.root, path.resolve(monitoredDirectory));
+  assert.equal(service.watchService.session.root, canonicalMonitor);
 
   await service.pauseProtection();
   const stopped = await service.stopMonitor();
