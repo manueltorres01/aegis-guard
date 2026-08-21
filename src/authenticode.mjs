@@ -12,10 +12,9 @@ const SCRIPT = [
   "$status = if ($signature) { $signature.Status.ToString() } else { 'Error' }",
   "$chainStatus = @()",
   "$chainValid = $false",
-  // Authenticode status is checked locally; online revocation can block the
-  // scanner for several seconds or fail on an offline machine. A future
-  // reputation/update service can perform an explicit online refresh.
-  "if ($signature.SignerCertificate) { $chain = [Security.Cryptography.X509Certificates.X509Chain]::new(); $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::Offline; $chain.ChainPolicy.RevocationFlag = [Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot; try { $chainValid = $chain.Build($signature.SignerCertificate); $chainStatus = @($chain.ChainStatus | ForEach-Object { $_.Status.ToString() }) } finally { $chain.Dispose() } }",
+  // Keep signature status local and bounded. Building an X509 chain can
+  // invoke certificate retrieval on Windows and block the scanner; an
+  // explicit reputation/update service can perform that online refresh later.
   "$timestampSubject = if ($signature.TimeStamperCertificate) { $signature.TimeStamperCertificate.Subject } else { '' }",
   "$version = try { [Diagnostics.FileVersionInfo]::GetVersionInfo($targetPath) } catch { $null }",
   "$zone = ''",
