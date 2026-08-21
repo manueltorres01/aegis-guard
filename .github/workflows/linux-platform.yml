@@ -26,5 +26,5 @@ jobs:
       - name: Verify Linux capability report
         shell: bash
         run: |
-          npm run platform:linux > linux-platform.json
+          npm run --silent platform:linux > linux-platform.json
           node --input-type=module -e "const report = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile('linux-platform.json', 'utf8'))); if (!report.available || report.source !== 'linux-userspace' || report.capabilities.enforcement) process.exit(1); console.log(report.distribution?.pretty_name || report.profile.mode);"
